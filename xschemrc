@@ -1,0 +1,72 @@
+source /usr/local/share/pdk/sky130B/libs.tech/xschem/xschemrc
+set tk_scaling 2
+
+set replace_key(Button-4) Control-ButtonPress-5
+set replace_key(Button-5) Control-ButtonPress-4
+
+set replace_key(Control-Button-4) ButtonPress-4
+set replace_key(Control-Button-5) ButtonPress-5
+
+set replace_key(Shift-Button-4) Shift-ButtonPress-5
+set replace_key(Shift-Button-5) Shift-ButtonPress-4
+
+# stb simulation blocks
+proc stb_menu {} {
+  global has_x netlist_dir
+  if { [info exist has_x] } {
+    set topwin [xschem get top_path]
+
+    # insert before the 'Netlist' menu
+    $topwin.menubar insert Netlist cascade -label SimuBlocks -menu $topwin.menubar.simublocks
+    menu $topwin.menubar.simublocks -tearoff 0
+
+    ## Create one entry
+    $topwin.menubar.simublocks add command -label {Add STB .control} -command {
+      xschem place_symbol /home/tester/proj/modules/loopgainprobe.sym {name=X999}
+      xschem place_symbol devices/simulator_commands_shown.sym {
+name=COMMANDS_STB
+simulator=ngspice
+only_toplevel=false 
+value="
+.control
+  shell rm -f stb.raw
+  alter i.X999.Ii acmag=0
+  alter v.X999.Vi acmag=1
+  ac dec 10 1 1e10
+  set v_run = $curplot
+
+  alter i.X999.Ii acmag=1
+  alter v.X999.Vi acmag=0
+  ac dec 10 1 1e10
+  set i_run = $curplot
+  setplot $i_run
+
+  let LoopGain = 1/(1-1/(2*({$v_run}.I(v.X999.Vi)*{$i_run}.V(X999.x)-{$v_run}.V(X999.x)*{$i_run}.I(v.X999.Vi))+{$v_run}.V(X999.x)+{$i_run}.I(v.X999.Vi)))
+  let mag = db(LoopGain)
+  let phase = 180*cph(LoopGain)/pi
+
+  meas ac ugbw_freq when mag=0
+  meas ac pm_val find phase when mag=0
+  meas ac gm_val find mag when phase=0
+
+  let ugbw = ugbw_freq
+  let pm = pm_val
+  let gm = gm_val
+
+  write stb.raw mag phase ugbw pm LoopGain gm
+.endc
+"
+      }
+    }
+  }
+}
+
+# 定義好你的 stb_menu 之後...
+if {![info exists user_startup_commands]} {
+    set user_startup_commands "stb_menu"
+} else {
+    # 關鍵在於這個分號 ";"
+    # 確保執行時變成 "sky130_menupdk ; stb_menu"
+    append user_startup_commands " ; stb_menu"
+}
+#after 500 stb_menu

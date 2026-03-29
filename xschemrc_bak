@@ -1,0 +1,68 @@
+source /usr/local/share/pdk/sky130B/libs.tech/xschem/xschemrc
+set tk_scaling 2
+
+# --- Xschem 滾輪習慣終極修正案 ---
+
+# 定義一個針對原理圖畫布的精準綁定過程
+proc apply_mouse_fixes {win} {
+    if {![winfo exists $win]} {return}
+
+    # 1. 純滾輪 -> 模擬 Shift 動作 (state=1) -> 觸發垂直平移
+    bind $win <Button-4> { xschem callback %W 4 %x %y 0 4 0 4; break }
+    bind $win <Button-5> { xschem callback %W 4 %x %y 0 5 0 4; break }
+
+    # 2. Ctrl + 滾輪 -> 模擬無按鍵 (state=0) -> 觸發縮放 (Zoom)
+    # 這裡不加 0x800，保證 C 核心能識別
+    bind $win <Control-Button-4> { xschem callback %W 4 %x %y 0 4 0 0; break }
+    bind $win <Control-Button-5> { xschem callback %W 4 %x %y 0 5 0 0; break }
+
+    # 3. Shift + 滾輪 -> 模擬 Ctrl 動作 (state=4) -> 觸發水平平移
+    bind $win <Shift-Button-4> { xschem callback %W 4 %x %y 0 4 0 1; break }
+    bind $win <Shift-Button-5> { xschem callback %W 4 %x %y 0 5 0 1; break }
+}
+
+# 考慮到 Xschem 的多標籤頁 (Tabs)，我們針對可能的畫布路徑都刷一遍
+# 這只會影響原理圖 (.drw)，不會影響仿真圖 (.graph)
+foreach canvas {.drw .x1.drw .x2.drw .x3.drw .x4.drw .x5.drw} {
+    apply_mouse_fixes $canvas
+}
+
+# 每當滑鼠進入新窗口時，自動補強一次綁定 (確保萬無一失)
+bind all <Enter> {
+    set win [xschem get current_win_path]
+    if {[string match "*.drw" $win]} {
+        apply_mouse_fixes $win
+    }
+}
+
+
+# --- 1. 定義一個局部綁定函數 ---
+proc apply_native_binds {win} {
+    if {![winfo exists $win]} {return}
+
+    # 單純滾輪 -> 發送 4 -> 觸發垂直平移 (Vertical Pan)
+    # 使用 break 確保不會觸發 C 核心默認的縮放
+    bind $win <Button-4> { xschem callback %W 4 %x %y 0 4 0 4; break }
+    bind $win <Button-5> { xschem callback %W 4 %x %y 0 5 0 4; break }
+
+    # Ctrl + 滾輪 -> 發送 0 -> 觸發縮放 (Zoom)
+    bind $win <Control-Button-4> { xschem callback %W 4 %x %y 0 4 0 0; break }
+    bind $win <Control-Button-5> { xschem callback %W 4 %x %y 0 5 0 0; break }
+
+    # Shift + 滾輪 -> 發送 1 -> 觸發水平平移 (Horizontal Pan)
+    bind $win <Shift-Button-4> { xschem callback %W 4 %x %y 0 4 0 1; break }
+    bind $win <Shift-Button-5> { xschem callback %W 4 %x %y 0 5 0 1; break }
+}
+
+# --- 2. 自動應用到原理圖畫布 ---
+# 每當鼠標進入窗口，如果是原理圖 (*.drw)，就刷新一遍綁定
+bind all <Enter> {
+    set win_path [xschem get current_win_path]
+    if {[string match "*.drw" $win_path]} {
+        # 獲取當前具有焦點的窗口名（即畫布本體）
+        set canvas [focus]
+        if {$canvas != ""} {
+            apply_native_binds $canvas
+        }
+    }
+}
