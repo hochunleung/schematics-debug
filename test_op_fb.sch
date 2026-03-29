@@ -6,8 +6,8 @@ S {}
 F {}
 E {}
 B 2 380 -300 1180 100 {flags=graph
-y1=0
-y2=0.01
+y1=-700
+y2=-690
 ypos1=0
 ypos2=2
 divy=5
@@ -28,31 +28,9 @@ logy=0
 autoload=1
 sim_type=ac
 rawfile=$netlist_dir/test_op_fb.raw}
-B 2 1180 -300 1980 100 {flags=graph,unlocked
-y1=1
-y2=1.1
-ypos1=0
-ypos2=2
-divy=5
-subdivy=1
-unity=1
-x1=0
-x2=10
-divx=5
-subdivx=8
-xlabmag=1.0
-ylabmag=1.0
-node=vout
-color=4
-dataset=-1
-unitx=1
-logx=1
-logy=0
-autoload=1
-sim_type=ac}
 B 2 380 100 1180 500 {flags=graph
-y1=180
-y2=190
+y1=0
+y2=0.01
 ypos1=0
 ypos2=2
 divy=5
@@ -72,6 +50,50 @@ logx=1
 logy=0
 sim_type=ac
 rawfile=$netlist_dir/test_op_fb.raw}
+B 2 1180 -300 1980 100 {flags=graph
+ypos1=0
+ypos2=2
+divy=5
+subdivy=1
+unity=1
+x1=0
+x2=10
+divx=5
+subdivx=8
+xlabmag=1.0
+ylabmag=1.0
+node="loopgain db20()"
+color=4
+dataset=-1
+unitx=1
+logx=1
+logy=0
+rawfile=$netlist_dir/stb.raw
+sim_type=ac
+y1=0
+y2=0.01}
+B 2 1180 100 1980 500 {flags=graph
+y1=0
+y2=0.01
+ypos1=0
+ypos2=2
+divy=5
+subdivy=1
+unity=1
+x1=0
+x2=10
+divx=5
+subdivx=8
+xlabmag=1.0
+ylabmag=1.0
+node=phase
+color=7
+dataset=-1
+unitx=1
+logx=1
+logy=0
+rawfile=$netlist_dir/stb.raw
+sim_type=ac}
 N -180 -10 -180 20 {lab=#net1}
 N -180 80 -180 180 {lab=vcm}
 N -180 180 -120 180 {lab=vcm}
@@ -94,18 +116,17 @@ N 60 10 80 10 {lab=#net4}
 N 80 10 80 20 {lab=#net4}
 N 80 20 110 20 {lab=#net4}
 N 80 -20 110 -20 {lab=#net3}
-N 230 -20 300 -20 {lab=#net3}
-N 230 20 300 20 {lab=#net4}
-N -80 10 -80 100 {lab=#net3}
-N 280 -100 280 20 {lab=#net4}
-N 260 -20 260 100 {lab=#net3}
-N -120 -100 -120 -10 {lab=#net4}
-N -120 -100 280 -100 {lab=#net4}
-N -80 100 260 100 {lab=#net3}
-N 110 -20 240 -20 {lab=#net3}
-N 110 20 240 20 {lab=#net4}
-N -120 -10 -60 -10 {lab=#net4}
-N -80 10 -50 10 {lab=#net3}
+N 230 -20 300 -20 {lab=#net5}
+N 230 20 300 20 {lab=#net6}
+N -80 10 -80 100 {lab=#net5}
+N 280 -100 280 20 {lab=#net6}
+N 260 -20 260 100 {lab=#net5}
+N -120 -100 -120 -10 {lab=#net6}
+N -120 -100 280 -100 {lab=#net6}
+N -80 100 260 100 {lab=#net5}
+N -120 -10 -60 -10 {lab=#net6}
+N -80 10 -50 10 {lab=#net5}
+N 170 50 170 70 {lab=GND}
 C {vcvs.sym} -180 50 0 0 {name=E1 value=0.5}
 C {vcvs.sym} -120 110 0 0 {name=E2 value=-0.5}
 C {vsource.sym} -120 260 0 0 {name=V1 value=0.9 savecurrent=false}
@@ -132,8 +153,10 @@ value="
   ac dec 10 1 1e10
   remzerovec 
   write test_op_fb.raw
+  alter V2 acmag=0
 .endc
-"}
+"
+spice_ignore=true}
 C {gnd.sym} -260 180 0 0 {name=l3 lab=GND}
 C {devices/launcher.sym} -10 140 0 0 {name=h2 
 descr="Annotate OP
@@ -144,5 +167,40 @@ set show_hidden_texts 1; xschem annotate_op
 "
 }
 C {/home/tester/proj/modules/ideal_op_diff_2stage.sym} 0 0 0 0 {name=x1 gm1=2.5m ro1=8k co1=100f gm2=10m ro2=5k co2=2p cc=100f rz=200}
-C {/home/tester/proj/modules/cmdmprobe.sym} 170 -210 0 0 {name=x2
-spice_ignore=true}
+C {gnd.sym} 170 70 0 0 {name=l4 lab=GND}
+C {simulator_commands_shown.sym} -560 390 0 0 {
+name=COMMANDS_STB
+simulator=ngspice
+only_toplevel=false 
+value="
+.control
+  shell rm -f stb.raw
+  alter i.X999.Ii acmag=0
+  alter v.X999.Vi acmag=1
+  ac dec 10 1 1e10
+  set v_run = $curplot
+
+  alter i.X999.Ii acmag=1
+  alter v.X999.Vi acmag=0
+  ac dec 10 1 1e10
+  set i_run = $curplot
+  setplot $i_run
+
+  let LoopGain = 1/(1-1/(2*(\{$v_run\}.I(v.X999.Vi)*\{$i_run\}.V(X999.x)-\{$v_run\}.V(X999.x)*\{$i_run\}.I(v.X999.Vi))+\{$v_run\}.V(X999.x)+\{$i_run\}.I(v.X999.Vi)))
+  let mag = db(LoopGain)
+  let phase = 180*cph(LoopGain)/pi
+
+*  meas ac ugbw_freq when mag=0
+*  meas ac pm_val find phase when mag=0
+*  meas ac gm_val find mag when phase=0
+
+*  let ugbw = ugbw_freq
+*  let pm = pm_val
+*  let gm = gm_val
+
+  write stb.raw mag phase LoopGain
+ *ugbw pm gm
+.endc
+"
+      }
+C {/home/tester/proj/modules/cmdmprobe.sym} 170 0 0 0 {name=X999}

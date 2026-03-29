@@ -19,7 +19,7 @@ N -180 -140 -150 -140 {lab=gnd}
 N -180 -140 -180 -100 {lab=gnd}
 N -80 -240 -40 -240 {lab=in1}
 N -80 -200 -40 -200 {lab=out1}
-C {isource.sym} 0 80 0 1 {name=Ii value="DC 0 AC 0"}
+C {isource.sym} 0 80 2 1 {name=Ii value="DC 0 AC 0"}
 C {iopin.sym} 0 160 1 0 {name=p1 lab=gnd}
 C {vsource.sym} -80 0 1 1 {name=Vi value="DC 0 AC 0" savecurrent=false}
 C {vsource.sym} 80 0 3 1 {name=Vprb value=0 savecurrent=false}
