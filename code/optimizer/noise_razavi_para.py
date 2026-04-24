@@ -9,22 +9,29 @@ import numpy as np
 
 def evaluate_differential_noise(op_config, freqs, T=300):
     """
-    全差分運放 Noise 評估核心函數
-    :param op_config: 來自 map_vars_to_params 的操作點字典，包含 'model' 實例
-    :param freqs: 頻率陣列 (Numpy array)
-    :param T: 絕對溫度 (預設 300K)
-    :return: dict 包含頻率、差分輸出雜訊 PSD、差分輸入等效雜訊 PSD 與閉迴路增益
+    全差分運放 (Buffer 配置) 雜訊評估函數 - 子矩陣精確求解版
+    :param op_config: 操作點字典，包含 'model' (如 nch, pch 等 LUT 實例)
+    :param freqs: 頻率陣列或列表
+    :return: 包含頻率、增益、總輸出雜訊、等效輸入雜訊及各元件貢獻的字典
     """
-    # 節點索引定義
+    # ==========================================
+    # 1. 定義節點 (擴充外部理想輸入節點)
+    # ==========================================
     N_P1, N_N1, N_S = 0, 1, 2
     N_1, N_2, N_3 = 3, 4, 5
     N_P2, N_N2, N_4 = 6, 7, 8
-    NUM_NODES = 9
+    # 新增：理想電壓源節點 (Inputs)
+    N_IN_P, N_IN_N = 9, 10 
+    
+    NUM_NODES = 11
+    free_nodes = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    inputs = [9, 10]
 
-    # 1. 動態提取 K 字典和寄生電容字典 (與原邏輯相同)
-    K_dict = {}
-    C_dict = {}
-    for inst, cfg in op_config.items():
+    # ==========================================
+    # 2. 提取參數
+    # ==========================================
+    K_dict, C_dict = {}, {}
+    for inst, cfg in op_config['mosfets'].items():
         if inst == 'passives': continue
         m = cfg['model']
         L, W, VGS, VDS = cfg['L'], cfg['W'], cfg['VGS'], cfg['VDS']
@@ -38,10 +45,25 @@ def evaluate_differential_noise(op_config, freqs, T=300):
 
     C_WELL_S = 3 * C_dict['M10']['Cdb'] 
     passives = op_config['passives']
-    kT4 = 4 * 1.380649e-23 * T  # 熱雜訊常數 4kT
+    kT4 = 4 * 1.380649e-23 * T
 
-    # 2. 構建動態 Y 矩陣 (保留你的原始結構，僅由外部傳入 s 與 y_miller)
-    def build_Y_matrix(s, y_miller):
+    # 準備儲存結果的容器
+    results = {
+        'freqs': freqs, 'gain': [], 'out_noise_psd': [], 'irn_psd': [],
+        'contributions': {comp: [] for comp in list(op_config['mosfets'].keys()) + ['R_in', 'R_fb', 'R_cmfb', 'R_miller']}
+    }
+    results['contributions'].pop('passives', None)
+
+    # ==========================================
+    # 3. 頻率迭代與矩陣求解
+    # ==========================================
+    for f in freqs:
+        w = 2 * np.pi * f
+        s = 1j * w if w != 0 else 1e-15j
+        
+        y_miller = 1.0 / (passives['Rz'] + 1.0/(s * passives['Cc']))
+        
+        # --- A. 建立 Y 矩陣 ---
         Y = np.zeros((NUM_NODES, NUM_NODES), dtype=complex)
         
         def add_y(n1, n2, y_val):
@@ -58,15 +80,18 @@ def evaluate_differential_noise(op_config, freqs, T=300):
                 if g >= 0: Y[src, g] -= gm
                 if src >= 0: Y[src, src] += gm
 
-        # --- 被動元件 ---
+        # 被動網路 (精確分離 Input 與 Feedback)
         R_in, R_cmfb = passives['R_in'], passives['R_cmfb']
+        # 1. 輸入電阻 (連接理想源與 Gate)
+        add_y(N_P1, N_IN_P, 1/R_in); add_y(N_N1, N_IN_N, 1/R_in)
+        # 2. 回饋電阻 (連接 Gate 與 輸出)
         add_y(N_P1, N_N2, 1/R_in); add_y(N_N1, N_P2, 1/R_in)
-        add_y(N_P1, -1, 1/R_in); add_y(N_N1, -1, 1/R_in)
+        
         add_y(N_P2, N_4, 1/R_cmfb); add_y(N_N2, N_4, 1/R_cmfb)
         add_y(N_1, N_3, 1/R_cmfb); add_y(N_2, N_3, 1/R_cmfb)
         add_y(N_P2, N_1, y_miller); add_y(N_N2, N_2, y_miller)
 
-        # --- 電容注入 ---
+        # 寄生電容與主動元件 (與原本相同)
         add_y(N_P1, N_S, s*C_dict['M1']['Cgs']); add_y(N_P1, N_1, s*C_dict['M1']['Cgd'])
         add_y(N_N1, N_S, s*C_dict['M2']['Cgs']); add_y(N_N1, N_2, s*C_dict['M2']['Cgd'])
         add_y(N_3, -1, s*C_dict['M3']['Cgs']); add_y(N_3, N_1, s*C_dict['M3']['Cgd'])
@@ -75,9 +100,8 @@ def evaluate_differential_noise(op_config, freqs, T=300):
         add_y(N_2, -1, s*C_dict['M6']['Cgs']); add_y(N_2, N_N2, s*C_dict['M6']['Cgd']); add_y(N_N2, -1, s*C_dict['M6']['Cdb'])
         add_y(N_4, -1, s*C_dict['M7']['Cgs']); add_y(N_4, N_P2, s*C_dict['M7']['Cgd']); add_y(N_P2, -1, s*C_dict['M7']['Cdb'])
         add_y(N_4, -1, s*C_dict['M8']['Cgs']); add_y(N_4, N_N2, s*C_dict['M8']['Cgd']); add_y(N_N2, -1, s*C_dict['M8']['Cdb'])
-        add_y(N_S, -1, s*(C_dict['M10']['Cdb'])) # + C_WELL_S
+        add_y(N_S, -1, s*(C_dict['M10']['Cdb'] + C_WELL_S))
 
-        # --- 跨導與輸出電導 ---
         add_gm(N_1, N_P1, N_S, K_dict['M1']['K10']); add_y(N_1, N_S, K_dict['M1']['K01'])
         add_gm(N_2, N_N1, N_S, K_dict['M2']['K10']); add_y(N_2, N_S, K_dict['M2']['K01'])
         add_gm(N_1, N_3, -1, K_dict['M3']['K10']);   add_y(N_1, -1, K_dict['M3']['K01'])
@@ -88,132 +112,134 @@ def evaluate_differential_noise(op_config, freqs, T=300):
         add_gm(N_N2, N_4, -1, K_dict['M8']['K10']);  add_y(N_N2, -1, K_dict['M8']['K01'])
         add_y(N_S, -1, K_dict['M10']['K01'])
 
-        return Y
-
-    # 3. 構建動態雜訊電流矩陣 SI
-    def build_SI_matrix(f, y_miller):
-        SI = np.zeros((NUM_NODES, NUM_NODES))
+        # --- B. 建立 SI 獨立貢獻字典 ---
+        SI_dict = {comp: np.zeros((NUM_NODES, NUM_NODES)) for comp in results['contributions'].keys()}
         
-        def add_i2(n1, n2, i2):
-            if n1 >= 0: SI[n1, n1] += i2
-            if n2 >= 0: SI[n2, n2] += i2
+        def add_i2(mat, n1, n2, i2):
+            if n1 >= 0: mat[n1, n1] += i2
+            if n2 >= 0: mat[n2, n2] += i2
             if n1 >= 0 and n2 >= 0:
-                SI[n1, n2] -= i2; SI[n2, n1] -= i2
+                mat[n1, n2] -= i2; mat[n2, n1] -= i2
 
-        # --- A. MOSFET 雜訊注入 (呼叫 LUT，並對應你的 Drain / Source 節點) ---
-        for inst, cfg in op_config.items():
+        # 1. 填寫 MOSFET 雜訊
+        for inst, cfg in op_config['mosfets'].items():
             if inst == 'passives': continue
-            m = cfg['model']
-            L, W, VGS, VDS = cfg['L'], cfg['W'], cfg['VGS'], cfg['VDS']
-            
-            # 從 LUT 取得該頻率的電流 PSD
+            m, L, W, VGS, VDS = cfg['model'], cfg['L'], cfg['W'], cfg['VGS'], cfg['VDS']
             i2_n = m.get_noise_psd(L, VGS, VDS, W, f)
             
-            if inst == 'M1': add_i2(N_1, N_S, i2_n)
-            elif inst == 'M2': add_i2(N_2, N_S, i2_n)
-            elif inst == 'M3': add_i2(N_1, -1, i2_n)
-            elif inst == 'M4': add_i2(N_2, -1, i2_n)
-            elif inst == 'M5': add_i2(N_P2, -1, i2_n)
-            elif inst == 'M6': add_i2(N_N2, -1, i2_n)
-            elif inst == 'M7': add_i2(N_P2, -1, i2_n)
-            elif inst == 'M8': add_i2(N_N2, -1, i2_n)
-            elif inst == 'M10': add_i2(N_S, -1, i2_n)
+            mat = SI_dict[inst]
+            if inst == 'M1': add_i2(mat, N_1, N_S, i2_n)
+            elif inst == 'M2': add_i2(mat, N_2, N_S, i2_n)
+            elif inst == 'M3': add_i2(mat, N_1, -1, i2_n)
+            elif inst == 'M4': add_i2(mat, N_2, -1, i2_n)
+            elif inst == 'M5': add_i2(mat, N_P2, -1, i2_n)
+            elif inst == 'M6': add_i2(mat, N_N2, -1, i2_n)
+            elif inst == 'M7': add_i2(mat, N_P2, -1, i2_n)
+            elif inst == 'M8': add_i2(mat, N_N2, -1, i2_n)
+            elif inst == 'M10': add_i2(mat, N_S, -1, i2_n)
 
-        # --- B. 被動元件熱雜訊注入 ---
-        R_in, R_cmfb = passives['R_in'], passives['R_cmfb']
-        add_i2(N_P1, N_N2, kT4 / R_in); add_i2(N_N1, N_P2, kT4 / R_in)
-        add_i2(N_P1, -1, kT4 / R_in); add_i2(N_N1, -1, kT4 / R_in)
+        # 2. 填寫被動元件雜訊 (分離 R_in 與 R_fb)
+        add_i2(SI_dict['R_in'], N_P1, N_IN_P, kT4 / R_in)
+        add_i2(SI_dict['R_in'], N_N1, N_IN_N, kT4 / R_in)
         
-        add_i2(N_P2, N_4, kT4 / R_cmfb); add_i2(N_N2, N_4, kT4 / R_cmfb)
-        add_i2(N_1, N_3, kT4 / R_cmfb); add_i2(N_2, N_3, kT4 / R_cmfb)
+        add_i2(SI_dict['R_fb'], N_P1, N_N2, kT4 / R_in)
+        add_i2(SI_dict['R_fb'], N_N1, N_P2, kT4 / R_in)
+        
+        add_i2(SI_dict['R_cmfb'], N_P2, N_4, kT4 / R_cmfb)
+        add_i2(SI_dict['R_cmfb'], N_N2, N_4, kT4 / R_cmfb)
+        add_i2(SI_dict['R_cmfb'], N_1, N_3, kT4 / R_cmfb)
+        add_i2(SI_dict['R_cmfb'], N_2, N_3, kT4 / R_cmfb)
 
-        # --- C. Miller 電阻的等效 Norton 雜訊電流 ---
-        # 串聯 R-C 分支的等效電流雜訊為 I_n^2 = 4kT * Rz * |Y_miller|^2
         i2_miller = kT4 * passives['Rz'] * (np.abs(y_miller)**2)
-        add_i2(N_P2, N_1, i2_miller)
-        add_i2(N_N2, N_2, i2_miller)
+        add_i2(SI_dict['R_miller'], N_P2, N_1, i2_miller)
+        add_i2(SI_dict['R_miller'], N_N2, N_2, i2_miller)
 
-        return SI
+        # --- C. 提取子矩陣與求解 ---
+        Y_ff = Y[np.ix_(free_nodes, free_nodes)]
+        Y_fi = Y[np.ix_(free_nodes, inputs)]
+        
+        try:
+            Z_ff = np.linalg.inv(Y_ff)
+        except np.linalg.LinAlgError:
+            continue
 
-    # 4. 準備求解矩陣與儲存結果
-    S_out_diff = np.zeros(len(freqs))
-    S_in_diff = np.zeros(len(freqs))
-    Av_mag = np.zeros(len(freqs))
+        # 1. 求解閉環增益 (設定差分輸入 V_IN_P = 0.5V, V_IN_N = -0.5V)
+        # V_in = np.array([0.5, -0.5]) 
+        # V_free = -Z_ff @ (Y_fi @ V_in)
+        # 1. 求解閉環增益 (Robust 版本)
+        # 建立「全節點規模」的輸入電壓向量
+        V_in_full = np.zeros(NUM_NODES)
+        V_in_full[N_IN_P] = 0.5
+        V_in_full[N_IN_N] = -0.5
+        
+        # 自動提取屬於 inputs 節點的激勵電壓
+        V_in = V_in_full[inputs] 
+        
+        V_free = -Z_ff @ (Y_fi @ V_in)
+        
+        # 利用同樣的切片邏輯計算差分輸出 (避免 V_free 索引錯位)
+        # 建立全節點的電壓分佈 (已知 inputs 節點電壓，結合求出的 free 節點電壓)
+        V_nodes_full = np.zeros(NUM_NODES, dtype=complex)
+        V_nodes_full[free_nodes] = V_free
+        V_nodes_full[inputs] = V_in
+        # 差分輸出電壓 = V(P2) - V(N2)
+        diff_gain = np.abs(V_free[N_P2] - V_free[N_N2])
+        results['gain'].append(diff_gain)
 
-    # 定義差分提取向量
-    c_out = np.zeros(NUM_NODES); c_out[N_P2] = 1; c_out[N_N2] = -1
-    c_in = np.zeros(NUM_NODES); c_in[N_P1] = 1; c_in[N_N1] = -1
+        # 2. 求解各元件的雜訊貢獻
+        # 建立差分輸出提取向量 [0,0,..., 1(P2), -1(N2), 0]
+        # c_out = np.zeros(len(free_nodes))
+        # c_out[N_P2] = 1; c_out[N_N2] = -1
+        # ==========================================
+        # 2. 求解各元件的雜訊貢獻 (Robust 版本)
+        # ==========================================
+        # 建立「全節點規模」的差分輸出提取向量
+        c_out_full = np.zeros(NUM_NODES)
+        c_out_full[N_P2] = 1
+        c_out_full[N_N2] = -1
+        
+        # 透過 Numpy 陣列切片，自動精準映射到 free_nodes 的相對維度！
+        c_out = c_out_full[free_nodes]
+        # H_out 是將所有 free_nodes 電流轉換到差分輸出電壓的轉移向量
+        H_out = c_out @ Z_ff 
 
-    for i, f in enumerate(freqs):
-        w = 2 * np.pi * f
-        s = 1j * w if w != 0 else 1e-15j # 防止 DC 除以 0
+        total_out_psd = 0
+        for comp_name, SI_mat in SI_dict.items():
+            SI_ff = SI_mat[np.ix_(free_nodes, free_nodes)]
+            # 向量-矩陣-向量 乘法得到純量 PSD
+            comp_out_psd = np.real(H_out @ SI_ff @ H_out.conj().T)
+            results['contributions'][comp_name].append(comp_out_psd)
+            total_out_psd += comp_out_psd
+            
+        results['out_noise_psd'].append(total_out_psd)
         
-        y_miller = 1.0 / (passives['Rz'] + 1.0/(s * passives['Cc']))
-        
-        # 建立導納與雜訊矩陣
-        Y = build_Y_matrix(s, y_miller)
-        SI = build_SI_matrix(f, y_miller)
-        
-        # 求解阻抗矩陣 Z = Y^-1
-        Z = np.linalg.inv(Y)
-        
-        # --- 步驟 A：計算差分輸出雜訊 PSD ---
-        Z_out_diff = c_out @ Z  # 提取輸出差分行的阻抗向量
-        s_out = (Z_out_diff @ SI @ Z_out_diff.conj().T).real
-        S_out_diff[i] = s_out
-        
-        # --- 步驟 B：利用 MNA 推導精確的閉迴路電壓增益 ---
-        # 藉由在差分輸入端注入 1A 測試電流，反推各節點電壓
-        V_nodes_test = Z @ c_in.T  
-        V_in_diff_test = c_in @ V_nodes_test   # 考慮了 Rin 與 Cgs 後的實際輸入跨壓
-        V_out_diff_test = c_out @ V_nodes_test # 實際產生的輸出電壓
-        
-        Av = V_out_diff_test / V_in_diff_test
-        Av_mag[i] = np.abs(Av)
-        
-        # --- 步驟 C：計算輸入等效雜訊 PSD ---
-        S_in_diff[i] = s_out / (np.abs(Av)**2)
+        # 3. 計算等效輸入雜訊 (IRN)
+        results['irn_psd'].append(total_out_psd / (diff_gain**2))
 
-    return {
-        'freqs': freqs,
-        'S_out_diff': S_out_diff,
-        'S_in_diff': S_in_diff,
-        'Gain_V_V': Av_mag
-    }
-
+    return results
 
 if __name__ == "__main__":
-    # ⚠️ 請填入該全差分 Op-amp 在 Cadence dcOp 中的實際電壓 (PMOS 請填絕對值)
-    # OP_CONFIG = {
-    #     'M1':  {'vgs': 0.2565, 'vds': 0.4191, 'model': 'nch_lvt', 'type_inl': 'nch'}, # 第一級輸入對管 (左)
-    #     'M2':  {'vgs': 0.2565, 'vds': 0.4191, 'model': 'nch_lvt', 'type_inl': 'nch'}, # 第一級輸入對管 (右)
-    #     'M3':  {'vgs': 0.2873, 'vds': 0.2873, 'model': 'pch', 'type_inl': 'pch'},     # 第一級負載 (左)
-    #     'M4':  {'vgs': 0.2873, 'vds': 0.2873, 'model': 'pch', 'type_inl': 'pch'},     # 第一級負載 (右)
-    #     'M5':  {'vgs': 0.2873, 'vds': 0.4498, 'model': 'pch', 'type_inl': 'pch'},    # 第二級驅動 (左)
-    #     'M6':  {'vgs': 0.2873, 'vds': 0.4498, 'model': 'pch', 'type_inl': 'pch'},    # 第二級驅動 (右)
-    #     'M7':  {'vgs': 0.3301, 'vds': 0.4502, 'model': 'nch', 'type_inl': 'nch'},     # 第二級負載 (左)
-    #     'M8':  {'vgs': 0.3301, 'vds': 0.4502, 'model': 'nch', 'type_inl': 'nch'},     # 第二級負載 (右)
-    #     'M10': {'vgs': 0.4585, 'vds': 0.1936, 'model': 'nch', 'type_inl': 'nch'}     # 尾電流源
-    # }
-    
     # 載入 LUT 資料庫 (注意 P 管開啟 is_pmos=True)
     nch_lvt = MosData('nch_lvt_lut.csv', W_ref=4e-6, is_pmos=False)
     nch = MosData('nch_lut.csv', W_ref=4e-6, is_pmos=False)
     pch = MosData('pch_lut.csv', W_ref=4e-6, is_pmos=True)
     op_config = {
-        'M1':  {'VGS': 0.2565, 'VDS': 0.4191, 'W': 96e-6, 'L': 100e-9, 'model': nch_lvt, 'type_inl': 'nch'},
-        'M2':  {'VGS': 0.2565, 'VDS': 0.4191, 'W': 96e-6, 'L': 100e-9, 'model': nch_lvt, 'type_inl': 'nch'},
-        'M3':  {'VGS': 0.2873, 'VDS': 0.2873, 'W': 96e-6, 'L': 100e-9, 'model': pch, 'type_inl': 'pch'},
-        'M4':  {'VGS': 0.2873, 'VDS': 0.2873, 'W': 96e-6, 'L': 100e-9, 'model': pch, 'type_inl': 'pch'},
-        'M5':  {'VGS': 0.2873, 'VDS': 0.4498, 'W': 192e-6,'L': 100e-9, 'model': pch, 'type_inl': 'pch'},
-        'M6':  {'VGS': 0.2873, 'VDS': 0.4498, 'W': 192e-6,'L': 100e-9, 'model': pch, 'type_inl': 'pch'},
-        'M7':  {'VGS': 0.3301, 'VDS': 0.4502, 'W': 48e-6, 'L': 100e-9, 'model': nch, 'type_inl': 'nch'},
-        'M8':  {'VGS': 0.3301, 'VDS': 0.4502, 'W': 48e-6, 'L': 100e-9, 'model': nch, 'type_inl': 'nch'},
-        'M10': {'VGS': 0.4585, 'VDS': 0.1936, 'W': 32e-6, 'L': 500e-9, 'model': nch, 'type_inl': 'nch'},
+        'mosfets': {
+            'M1':  {'VGS': 0.2565, 'VDS': 0.4191, 'W': 96e-6, 'L': 100e-9, 'model': nch_lvt, 'type_inl': 'nch'},
+            'M2':  {'VGS': 0.2565, 'VDS': 0.4191, 'W': 96e-6, 'L': 100e-9, 'model': nch_lvt, 'type_inl': 'nch'},
+            'M3':  {'VGS': 0.2873, 'VDS': 0.2873, 'W': 96e-6, 'L': 100e-9, 'model': pch, 'type_inl': 'pch'},
+            'M4':  {'VGS': 0.2873, 'VDS': 0.2873, 'W': 96e-6, 'L': 100e-9, 'model': pch, 'type_inl': 'pch'},
+            'M5':  {'VGS': 0.2873, 'VDS': 0.4498, 'W': 192e-6,'L': 100e-9, 'model': pch, 'type_inl': 'pch'},
+            'M6':  {'VGS': 0.2873, 'VDS': 0.4498, 'W': 192e-6,'L': 100e-9, 'model': pch, 'type_inl': 'pch'},
+            'M7':  {'VGS': 0.3301, 'VDS': 0.4502, 'W': 48e-6, 'L': 100e-9, 'model': nch, 'type_inl': 'nch'},
+            'M8':  {'VGS': 0.3301, 'VDS': 0.4502, 'W': 48e-6, 'L': 100e-9, 'model': nch, 'type_inl': 'nch'},
+            'M10': {'VGS': 0.4585, 'VDS': 0.1936, 'W': 32e-6, 'L': 500e-9, 'model': nch, 'type_inl': 'nch'},
         # 被動元件一併傳遞
+        },
         'passives': {'R_f': 4000, 'R_in': 4000, 'Rz': 204.6, 'Cc': 402e-15, 'R_cmfb': 40e3}
     }
-    noise = evaluate_differential_noise(op_config, [10e3])
-    # metrics = evaluate_volterra_sfdr(op_config, V_AMP_IN=0.316, FIN=53/512*100e6)
+    noise = evaluate_differential_noise(op_config, [10e6])    
+    print(f"Gain      : {noise['gain'][0]} ")
+    print(f"out noise : {noise['out_noise_psd'][0]} ")
+    print(f"in  noise : {noise['irn_psd'][0]} ")
     
-    print(f"out noise : {noise['S_out_diff'][0]} ")

@@ -1,9 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from lut_engine import MosData
-from dc_razavi import solve_dc_fully_diff
+from circuit_netlist import CircuitNetlist
+from dc_analysis import solve_dc
+from utils import load_circuit_config
+from pprint import pprint
 
-def evaluate_razavi_fully_diff_optimizer_ready(op_config, is_plot=False):
+def stb_analysis(op_config, is_plot=False):
     """
     可參數化的 MNA 求解器，專為 gm/ID LUT 優化器設計。
     :param params: 包含所有小訊號參數與寄生電容的字典 (由 LUT 生成)
@@ -18,14 +21,17 @@ def evaluate_razavi_fully_diff_optimizer_ready(op_config, is_plot=False):
     # 1. 矩陣索引映射 (Mapping)
     # 確保 MNA[0] = I_vidm, MNA[1] = V_x，以標準化 Tian's Method
     # =================================================================
-    I_VIDM = 0; N_X = 1; N_P2 = 2; N_P = 3; N_N2 = 4; N_N = 5
-    N_P1 = 6; N_N1 = 7; N_1 = 8; N_2 = 9; N_3 = 10; N_4 = 11; N_S = 12
-    I_VPRB = 13; I_EVINJ = 14
-    
     GND = -1 # AC 地的約定索引
 
-    gmbs1 = 138.7e-6
-    csb1 = 25.3e-15
+    fixed_voltages = ['VDD', 'VCM', '0', 'inp', 'inn']
+    all_nodes = op_config['all_nodes']
+    stb_nodes = sorted(list(set(all_nodes) - set(fixed_voltages)))
+    stb_nodes.extend(['I_Vprb', 'I_Vi', 'I_evinj'])
+    NUM_VARS = len(stb_nodes)
+    node_to_idx = {n: i for i, n in enumerate(stb_nodes)}
+    #pprint(stb_nodes); pprint(node_to_idx)
+
+    #gmbs1 = 138.7e-6;    #csb1 = 25.3e-15
 
     # 1. 動態提取 K 字典和寄生電容字典
     K_dict = {}
@@ -49,21 +55,26 @@ def evaluate_razavi_fully_diff_optimizer_ready(op_config, is_plot=False):
 
     for i, w in enumerate(w_array):
         s = 1j * w
-        A = np.zeros((15, 15), dtype=complex)
+        A = np.zeros((NUM_VARS, NUM_VARS), dtype=complex)
         
         # =================================================================
         # 2. 輔助函數 (Stamps) 
         # (閉包函數，直接操作當前頻率點的 A 矩陣)
         # =================================================================
-        def add_y(n1, n2, y_val):
+        def add_y(name1, name2, y_val):
             """添加雙端導納 (電阻/電容)"""
+            n1 = node_to_idx[name1] if name1 in node_to_idx else GND
+            n2 = node_to_idx[name2] if name2 in node_to_idx else GND
             if n1 != GND: A[n1, n1] += y_val
             if n2 != GND: A[n2, n2] += y_val
             if n1 != GND and n2 != GND:
                 A[n1, n2] -= y_val
                 A[n2, n1] -= y_val
 
-        def add_gm(d, g, src, gm):
+        def add_gm(d_name, g_name, src_name, gm):
+            d = node_to_idx[d_name] if d_name in node_to_idx else GND
+            g = node_to_idx[g_name] if g_name in node_to_idx else GND
+            src = node_to_idx[src_name] if src_name in node_to_idx else GND
             """添加 VCCS (跨導)"""
             if d != GND:
                 if g != GND:   A[d, g] += gm
@@ -72,7 +83,9 @@ def evaluate_razavi_fully_diff_optimizer_ready(op_config, is_plot=False):
                 if g != GND:   A[src, g] -= gm
                 if src != GND: A[src, src] += gm
                 
-        def add_gmbs(d, src, gmbs):
+        def add_gmbs(d_name, src_name, gmbs):
+            d = node_to_idx[d_name] if d_name in node_to_idx else GND
+            src = node_to_idx[src_name] if src_name in node_to_idx else GND
             """添加體效應 (Source 參考 AC GND)
             數學上等效於一個受 Source 負電壓控制的 gm"""
             add_gm(d, GND, src, gmbs)
@@ -81,94 +94,62 @@ def evaluate_razavi_fully_diff_optimizer_ready(op_config, is_plot=False):
         # 3. 填入被動元件與寄生網路
         # =================================================================
         # 回授與負載電阻
-        passives = op_config['passives']
-        add_y(N_P, N_N1, 1/passives['R_f'])
-        add_y(N_N, N_P1, 1/passives['R_f'])
-        add_y(N_P1, GND, 1/passives['R_in'])
-        add_y(N_N1, GND, 1/passives['R_in'])
+        for res, nodes in op_config.get('R', {}).items():
+            add_y(nodes['p'], nodes['n'], 1/nodes['val'])
+        for cap, nodes in op_config.get('C', {}).items():
+            add_y(nodes['p'], nodes['n'], s * nodes['val'])
         
-        # CMFB 電阻
-        add_y(N_P2, N_4, 1/passives['R_cmfb'])
-        add_y(N_N2, N_4, 1/passives['R_cmfb'])
-        add_y(N_1, N_3, 1/passives['R_cmfb'])
-        add_y(N_2, N_3, 1/passives['R_cmfb'])
-        
-        # 米勒補償分支 (Rz + Cc)
-        y_miller = (s * passives['Cc']) / (1 + s * passives['Rz'] * passives['Cc'])
-        add_y(N_P2, N_1, y_miller)
-        add_y(N_N2, N_2, y_miller)
-
         # =================================================================
         # 4. 填入主動元件 (電晶體 Model)
         # =================================================================
-        # M13, M14 (第一級輸入對)
-        add_gm(N_1, N_P1, N_S, K_dict['M1']['K10'])#; add_gmbs(N_1, N_S, params['gmbs1'])
-        add_y(N_1, N_S, K_dict['M1']['K01'])
-        add_y(N_P1, N_S, s*C_dict['M1']['Cgs']); add_y(N_P1, N_1, s*C_dict['M1']['Cgd'])
-        
-        add_gm(N_2, N_N1, N_S, K_dict['M1']['K10'])#; add_gmbs(N_2, N_S, params['gmbs1'])
-        add_y(N_2, N_S, K_dict['M1']['K01'])
-        add_y(N_N1, N_S, s*C_dict['M1']['Cgs']); add_y(N_N1, N_2, s*C_dict['M1']['Cgd'])
-        add_y(N_S, GND, s*csb1 * 2) # 源極寄生電容
-
-        # M17, M18 (第一級主動負載)
-        add_gm(N_1, N_3, GND, K_dict['M3']['K10'])
-        add_y(N_1, GND, K_dict['M3']['K01'] + s*(C_dict['M3']['Cdb'] + C_dict['M1']['Cdb']))
-        add_y(N_3, GND, s*C_dict['M3']['Cgs']); add_y(N_3, N_1, s*C_dict['M3']['Cgd'])
-        
-        add_gm(N_2, N_3, GND, K_dict['M3']['K10'])
-        add_y(N_2, GND, K_dict['M3']['K01'] + s*(C_dict['M3']['Cdb'] + C_dict['M1']['Cdb']))
-        add_y(N_3, GND, s*C_dict['M3']['Cgs']); add_y(N_3, N_2, s*C_dict['M3']['Cgd'])
-
-        # M15, M16 (第二級輸入)
-        add_gm(N_P2, N_1, GND, K_dict['M5']['K10'])
-        add_y(N_1, GND, s*C_dict['M5']['Cgs']); add_y(N_P2, N_1, s*C_dict['M5']['Cgd'])
-        
-        add_gm(N_N2, N_2, GND, K_dict['M5']['K10'])
-        add_y(N_2, GND, s*C_dict['M5']['Cgs']); add_y(N_N2, N_2, s*C_dict['M5']['Cgd'])
-
-        # M11, M12 (第二級主動負載)
-        add_gm(N_P2, N_4, GND, K_dict['M7']['K10'])
-        add_y(N_P2, GND, K_dict['M5']['K01'] + K_dict['M7']['K01'] + s*(C_dict['M5']['Cdb'] + C_dict['M7']['Cdb']))
-        add_y(N_4, GND, s*C_dict['M7']['Cgs']); add_y(N_4, N_P2, s*C_dict['M7']['Cgd'])
-        
-        add_gm(N_N2, N_4, GND, K_dict['M7']['K10'])
-        add_y(N_N2, GND, K_dict['M5']['K01'] + K_dict['M7']['K01'] + s*(C_dict['M5']['Cdb'] + C_dict['M7']['Cdb']))
-        add_y(N_4, GND, s*C_dict['M7']['Cgs']); add_y(N_4, N_N2, s*C_dict['M7']['Cgd'])
-
-        # M10 (尾電流源)
-        add_y(N_S, GND, K_dict['M10']['K01'] + s*C_dict['M10']['Cdb'])
+        for mos, nodes in op_config['mosfets'].items():
+            add_gm(nodes['d'], nodes['g'], nodes['s'], K_dict[mos]['K10'])
+            add_y(nodes['d'], nodes['s'], K_dict[mos]['K01'])
+            # add_gmbs(nodes['d'], nodes['s'], gmbs1)
+            add_y(nodes['g'], nodes['s'], s*C_dict[mos]['Cgs'])
+            add_y(nodes['d'], nodes['g'], s*C_dict[mos]['Cgd'])
+            add_y(nodes['d'], nodes['b'], s*C_dict[mos]['Cdb'])
 
         # =================================================================
         # 5. MNA 探針分支擴充 (Ideal Sources & KCL/KVL Stamps)
         # =================================================================
         # Vi_dm 探針電壓源 (I_VIDM 流出 N_X, 進入 N_P2)
-        A[N_X, I_VIDM] = 1; A[N_P2, I_VIDM] = -1
-        A[I_VIDM, N_X] = 1; A[I_VIDM, N_P2] = -1 # KVL: Vx - Vp2 = Vtest
+        vi = op_config['stb_probes']['Vi']
+        vi_p, vi_n = node_to_idx[vi['p']], node_to_idx[vi['n']]
+        I_vi = node_to_idx['I_Vi']
+        A[vi_p, I_vi] = 1; A[vi_n, I_vi] = -1
+        A[I_vi, vi_p] = 1; A[I_vi, vi_n] = -1  # KVL: Vx - Vp2 = Vtest
         
         # vprb 探針電壓源 (I_VPRB 流出 N_X, 進入 N_P)
-        A[N_X, I_VPRB] = 1; A[N_P, I_VPRB] = -1
-        A[I_VPRB, N_X] = 1; A[I_VPRB, N_P] = -1  # KVL: Vx - Vp = 0
+        vprb = op_config['stb_probes']['Vprb']
+        vprb_p, vprb_n = node_to_idx[vprb['p']], node_to_idx[vprb['n']]
+        I_vprb = node_to_idx['I_Vprb']  
+        A[vprb_p, I_vprb] = 1; A[vprb_n, I_vprb] = -1
+        A[I_vprb, vprb_p] = 1; A[I_vprb, vprb_n] = -1  # KVL: Vx - Vp =0
         
         # evinj 壓控電壓源 (I_EVINJ 流出 N_N2, 進入 N_N)
-        A[N_N2, I_EVINJ] = 1; A[N_N, I_EVINJ] = -1
-        A[I_EVINJ, N_N2] = 1; A[I_EVINJ, N_N] = -1; A[I_EVINJ, N_P2] = 1; A[I_EVINJ, N_P] = -1
+        evinj = op_config['stb_probes']['evinj']
+        evinj_p, evinj_n = node_to_idx[evinj['p']], node_to_idx[evinj['n']]
+        evinj_ctrl_p, evinj_ctrl_n = node_to_idx[evinj['ctrl_p']], node_to_idx[evinj['ctrl_n']]
+        I_evinj = node_to_idx['I_evinj']
+        A[evinj_p, I_evinj] = 1; A[evinj_n, I_evinj] = -1
+        A[I_evinj, evinj_p] = 1; A[I_evinj, evinj_n] = -1; A[I_evinj, evinj_ctrl_p] = 1; A[I_evinj, evinj_ctrl_n] = -1
         
         # fiinj 電流注入邏輯 (將 I_vprb 與 I_vidm 鏡像到 N_N)
-        A[N_N, I_VPRB] += 1; A[N_N, I_VIDM] += 1
+        A[evinj_n, I_vprb] += 1; A[evinj_n, I_vi] += 1
 
         # =========================================================
         # 6. Tian's Method 雙重交流掃描與提取
         # =========================================================
         # AC1: 電壓注入
-        rhs_ac1 = np.zeros(15, dtype=complex); rhs_ac1[I_VIDM] = 1  
+        rhs_ac1 = np.zeros(NUM_VARS, dtype=complex); rhs_ac1[I_vi] = 1  
         x1 = np.linalg.solve(A, rhs_ac1)
-        ac1_I_Vi = x1[I_VIDM]; ac1_V_x = x1[N_X]
+        ac1_I_Vi = x1[I_vi]; ac1_V_x = x1[vi_p]
         
         # AC2: 電流注入
-        rhs_ac2 = np.zeros(15, dtype=complex); rhs_ac2[N_X] = 1  
+        rhs_ac2 = np.zeros(NUM_VARS, dtype=complex); rhs_ac2[vi_p] = 1  
         x2 = np.linalg.solve(A, rhs_ac2)
-        ac2_I_Vi = x2[I_VIDM]; ac2_V_x = x2[N_X]
+        ac2_I_Vi = x2[I_vi]; ac2_V_x = x2[vi_p]
         
         cross_prod = ac1_I_Vi * ac2_V_x - ac1_V_x * ac2_I_Vi
         T_tian[i] = -1 / (1 - 1 / (2 * cross_prod + ac1_V_x + ac2_I_Vi))
@@ -219,47 +200,23 @@ def evaluate_razavi_fully_diff_optimizer_ready(op_config, is_plot=False):
         'gm': gain_margin}
 
 # ================= 測試代碼 =================
-W_unit = 4e-6
-L_unit = 10e-9
 if __name__ == "__main__":
     # 載入 LUT 資料庫 (注意 P 管開啟 is_pmos=True)
     nch_lvt = MosData('nch_lvt_lut.csv', W_ref=4e-6, is_pmos=False)
     nch = MosData('nch_lut.csv', W_ref=4e-6, is_pmos=False)
     pch = MosData('pch_lut.csv', W_ref=4e-6, is_pmos=True)
     models = {'nch': nch, 'nch_lvt': nch_lvt, 'pch': pch}
-    initial_guess = [
-        24,       # W1_units
-        10,       # L1_units
-        24,       # W3_units
-        10,       # L3_units
-        48,       # W5_units
-        12,       # W7_units
-        10,       # L7_units
-        8,        # W10_units
-        50,       # L10_units
-        402e-15,  # Cc
-        204.6,    # Rz
-        4000,     # Rf/R1
-        40e3,     # R_cmfb
-        78.5e-6  # I_tail
-    ]
-    # op_config = {
-    #     'M1':  {'VGS': 0.2565, 'VDS': 0.4191, 'W': 96e-6, 'L': 100e-9, 'model': nch_lvt, 'type_inl': 'nch'},
-    #     'M2':  {'VGS': 0.2565, 'VDS': 0.4191, 'W': 96e-6, 'L': 100e-9, 'model': nch_lvt, 'type_inl': 'nch'},
-    #     'M3':  {'VGS': 0.2873, 'VDS': 0.2873, 'W': 96e-6, 'L': 100e-9, 'model': pch, 'type_inl': 'pch'},
-    #     'M4':  {'VGS': 0.2873, 'VDS': 0.2873, 'W': 96e-6, 'L': 100e-9, 'model': pch, 'type_inl': 'pch'},
-    #     'M5':  {'VGS': 0.2873, 'VDS': 0.4498, 'W': 192e-6,'L': 100e-9, 'model': pch, 'type_inl': 'pch'},
-    #     'M6':  {'VGS': 0.2873, 'VDS': 0.4498, 'W': 192e-6,'L': 100e-9, 'model': pch, 'type_inl': 'pch'},
-    #     'M7':  {'VGS': 0.3301, 'VDS': 0.4502, 'W': 48e-6, 'L': 100e-9, 'model': nch, 'type_inl': 'nch'},
-    #     'M8':  {'VGS': 0.3301, 'VDS': 0.4502, 'W': 48e-6, 'L': 100e-9, 'model': nch, 'type_inl': 'nch'},
-    #     'M10': {'VGS': 0.4585, 'VDS': 0.1936, 'W': 32e-6, 'L': 500e-9, 'model': nch, 'type_inl': 'nch'},
-    #     # 被動元件一併傳遞
-    #     'passives': {'R_f': 4000, 'R_in': 4000, 'Rz': 204.6, 'Cc': 402e-15, 'R_cmfb': 40e3}
-    # }
-    op_config, dc = solve_dc_fully_diff(initial_guess, models)
-    stb = evaluate_razavi_fully_diff_optimizer_ready(op_config)
-    print("\n--- Verified AC Performance ---")
-    print(f"DC Gain     : {stb['gain']:.2f} dB")
-    print(f"Phase Margin: {stb['pm']:.2f} Deg")
-    print(f"Gain Margin : {stb['gm']:.2f} dB")
-    print(f"UGF         : {stb['ugf']/1e6:.2f} MHz")
+
+    #netlist = CircuitNetlist('buf_razavi_full.mdl', dialect='spectre')
+    netlist = CircuitNetlist('buf_razavi.net', dialect='spectre')
+
+    config_dc = load_circuit_config('config.json')
+    op_config, dc = solve_dc(netlist, models, config_dc)
+
+    stb = stb_analysis(op_config, is_plot=True)
+
+    # print("\n--- Verified AC Performance ---")
+    # print(f"DC Gain     : {stb['gain']:.2f} dB")
+    # print(f"Phase Margin: {stb['pm']:.2f} Deg")
+    # print(f"Gain Margin : {stb['gm']:.2f} dB")
+    # print(f"UGF         : {stb['ugf']/1e6:.2f} MHz")

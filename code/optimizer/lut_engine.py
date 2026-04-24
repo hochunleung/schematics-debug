@@ -12,6 +12,7 @@ class MosData:
         :param W_ref: 提取數據時使用的單根 Finger 寬度 (預設 2*2um)
         :param is_pmos: 是否為 PMOS (自動對電壓與電流取絕對值)
         """
+        self.W_ref = W_ref
         print(f"Loading {csv_path}...")
         self.df = pd.read_csv(csv_path)
         
@@ -24,6 +25,7 @@ class MosData:
         self.df['ID'] = self.df['ID'].clip(lower=epsilon)
         self.df['GDS'] = self.df['GDS'].clip(lower=epsilon)
         self.df['GM'] = self.df['GM'].clip(lower=epsilon)
+        self.df['VDSAT'] = self.df['VDSAT'].clip(lower=epsilon)
         
         # 3. 計算密度與本質參數
         self.df['ID_W'] = self.df['ID'] / W_ref
@@ -66,7 +68,7 @@ class MosData:
             print(f"Warning: Grid size mismatch! Expected {expected_size}, got {len(df_indexed)}. Interpolation may fail.")
 
         # [階段一] 先載入基礎參數並 reshape 成 3D 陣列
-        base_params = ['ID_W', 'GM_ID', 'GM_GDS', 'fT', 'GM', 'GDS', 'CGS_W', 'CGD_W', 'CDB_W', 'CGG_W']
+        base_params = ['VDSAT', 'ID_W', 'GM_ID', 'GM_GDS', 'fT', 'GM', 'GDS', 'CGS_W', 'CGD_W', 'CDB_W', 'CGG_W']
         # === 新增: 將正規化後的雜訊加入基礎參數列表 ===
         #if 'S_10Hz_W' in self.df.columns:
         base_params.extend(['S_10Hz_W', 'S_1kHz_W', 'S_10GHz_W'])

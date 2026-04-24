@@ -1,0 +1,3 @@
+M0 (out in VDD VDD) pch_mac l=100n w=4u multi=1 nf=2
+M1 (out in 0 0) nch_mac l=100n w=4u multi=1 nf=2
+R0 (in out) resistor r=100K

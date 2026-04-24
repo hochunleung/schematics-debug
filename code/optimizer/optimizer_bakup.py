@@ -1,6 +1,5 @@
 import numpy as np
-from scipy.optimize import differential_evolution, NonlinearConstraint
-from functools import lru_cache
+from scipy.optimize import differential_evolution
 from scipy.optimize import root
 from lut_engine import MosData
 from dc_razavi import solve_dc_fully_diff
@@ -26,103 +25,64 @@ W_unit = 4e-6
 L_unit = 10e-9
 
 # =====================================================================
-# 2. 緩存模擬引擎 (避免重複計算)
-# =====================================================================
-# 將 maxsize 設為 1，這意味著它只緩存「當前這一個候選解」的結果。
-# 當 objective 執行完後，constraints_func 調用相同的 x 時，會直接命中緩存。 (此處應為 constraints_func 先執行，objective 後執行)
-# 當優化器換到下一個樣本點時，舊緩存會被拋棄。
-# 這樣既消除了重複計算，又將記憶體佔用降到了最低（僅存儲一個解的結果）。
-@lru_cache(maxsize=1)
-def run_full_simulation(x_tuple):
-    """
-    執行所有昂貴的模擬計算並緩存結果。
-    x_tuple: 將 numpy array 轉為 tuple 以利緩存。
-    """
-    x = np.array(x_tuple)
-    try:
-        op_config, dc = solve_dc_fully_diff(x, models)
-        stb = evaluate_razavi_fully_diff_optimizer_ready(op_config, is_plot=False)
-        hd = evaluate_volterra_sfdr(op_config, V_AMP_IN=0.316, FIN=53/512*100e6)
-        noise = evaluate_differential_noise(op_config, [10e6])
-        
-        return {
-            'success': True,
-            'dc': dc,
-            'stb': stb,
-            'hd': hd,
-            'noise': noise
-        }
-    except Exception:
-        return {'success': False}
-
-# =====================================================================
-# 2. 定義約束函數 (Hard Constraints)
-# =====================================================================
-def constraints_func(x):
-    """
-    定義必須滿足的硬性指標：tail_vds > 0.16, pm > 60, gm > 15
-    """
-    res = run_full_simulation(tuple(x))
-    if not res['success']:
-        # 回傳值需與 lb=[0.16, 60, 15] 保持合理的「懲罰距離」
-        # -1.0 對應 VDS (量級 0.1V)
-        # -180.0 對應 PM (量級 10~100 deg)
-        # -100.0 對應 GM (量級 10~100 dB)
-        return [-1.0, -180.0, -100.0] 
-
-    dc, stb = res['dc'], res['stb']
-    # 新的 tail_vds 約束：dc['s'] >= dc['tail_vdsat']
-    # 等價於 dc['s'] - dc['tail_vdsat'] >= 0
-    tail_vds_violation = dc['s'] - dc['vdsat_tail']
-
-    return [
-        tail_vds_violation, # tail_vds - tail_vdsat
-        stb['pm'],      # Phase Margin
-        stb['gm']       # Gain Margin
-    ]
-
-# 定義約束對象：lb (下限), ub (上限)
-# tail_vds - tail_vdsat >= 0, pm > 60, gm > 15
-nlc = NonlinearConstraint(constraints_func, lb=[0.0, 60, 15], ub=[np.inf, np.inf, np.inf])
-
-# =====================================================================
 # 3. 定義 Cost Function (目標函數)
 # =====================================================================
 def objective(x):
-    """
-    目標函數只負責「越優越好」的部分。
-    採用歸一化加權和，避免某個指標過大主導搜索。
-    """
-    # 參考基準值 (用於歸一化)
-    gain_ref = 40.0
-    hd3_ref = 75.0
-    noise_ref = 4e-16
-    power_ref = 200e-6
-
-    # 權重分配 (可以根據你的優先級調整)
-    w_gain  = 1.0  # 增益權重
-    w_hd3   = 1.0  # 線性度權重
-    w_noise = 1.0  # 雜訊權重
-    w_power = 1.0  # 功耗權重
-
-    res = run_full_simulation(tuple(x))
-    if not res['success']:
+    try:
+        op_config, dc = solve_dc_fully_diff(x, models)
+        stb = evaluate_razavi_fully_diff_optimizer_ready(op_config, is_plot=False)
+        hd = evaluate_volterra_sfdr(op_config, V_AMP_IN = 0.316, FIN=53/512*100e6)
+        noise = evaluate_differential_noise(op_config, [10e6])
+        
+    except ValueError:
+        # 如果 DC 不收斂，回傳極大 Cost，讓優化器避開這組尺寸
+        return 1e12
+    except Exception:
         return 1e12
     
-    dc, stb, hd, noise = res['dc'], res['stb'], res['hd'], res['noise']
-
+    tail_vds = dc['s']
     i_total = dc['currents']['I_total']
-    gain = stb['gain']
+    pm, gm, gain, ugf= stb['pm'], stb['gm'], stb['gain'], stb['ugf']
     hd3 = np.abs(hd['HD3_dBc'])
+    out_noise = noise['out_noise_psd'][0]
     in_noise = noise['irn_psd'][0]
+    # 計算 Cost (加上你強化的懲罰邏輯)
+    # cost = 1000 * (x[9] / 1e12) # Cc
+    tail_vds_target = 0.16
+    pm_target = 60
+    gm_target = 15
+    hd3_target = 75
+    i_total_target = 200e-6
+    in_noise_target = 4e-16
+    gain_target = 40
 
-    # 性能 Cost 計算 (越小越好)
-    # 加上權重因子 w_...
-    cost = - w_gain  * (gain / gain_ref) \
-           - w_hd3   * (hd3 / hd3_ref) \
-           + w_noise * (in_noise / noise_ref) \
-           + w_power * (i_total / power_ref)
+    cost = 0
+    if tail_vds < tail_vds_target:
+        cost += 1e12 * (1 + (tail_vds_target - tail_vds) / tail_vds_target)**2
 
+    if pm < pm_target:
+        cost += 1e12 * (1 + (pm_target - pm) / pm_target)**2
+    
+    if gm < gm_target:
+        cost += 1e12 * (1 + (gm_target - gm) / gm_target)**2
+
+    if hd3 < hd3_target:
+        cost += 500 * (1 + (hd3_target - hd3) / hd3_target)**2
+    
+    if gain < gain_target:
+        cost += 500 * (1 + (gain_target - gain) / gain_target)**2
+    
+    if in_noise > in_noise_target:
+        cost += 500 * ((in_noise - in_noise_target) / in_noise_target)**2
+    
+    #3. UGF 頻寬要求 > 350 MHz
+    # if ugf < 350e6:
+    #     cost += 2000 * ((350e6 - ugf) / 350e6)**2
+    
+    if i_total > i_total_target:
+        cost += 500 * ((i_total - i_total_target) / i_total_target)**2
+
+    #print(f"PM: {pm}, GM: {gm}, Gain: {dc_gain}, GBW: {ugf}, cost: {cost}")
     return cost
 
 # =====================================================================
@@ -210,20 +170,7 @@ if __name__ == "__main__":
             init_pop[i, j] = np.random.uniform(low, high)
 
     # 3. 執行優化時傳入 init
-    result = differential_evolution(
-        objective, 
-        bounds, 
-        constraints=nlc, 
-        init=init_pop, 
-        integrality=integrality_mask,
-        popsize=30,   
-        maxiter=150,  # 稍微增加迭代次數，配合更強大的策略
-        strategy='currenttobest1bin', # 使用平衡型策略，提升全局搜索穩定性
-        mutation=(0.5, 1),           # 抖動變異率，有助於跳出局部最優
-        recombination=0.7,           # 保持適當的交叉比例
-        disp=True,
-        polish=False  # 關閉局部微調，節省大量時間
-    )
+    result = differential_evolution(objective, bounds, init=init_pop, integrality=integrality_mask, popsize=15, maxiter=50, disp=True)
 
     print("\n" + "="*50)
     print("🎉 Optimization Complete! 🎉")
@@ -250,7 +197,6 @@ if __name__ == "__main__":
     
     print("\n=== DC ===")
     print(f"Tail VDS      : {dc['s']*1e3:.2f} mV")
-    print(f"Tail VDSat    : {dc['vdsat_tail']*1e3:.2f} mV")
     print(f"Tail Current  : {dc['currents']['I_tail']*1e6:.2f} uA")
     print(f"Output Current: {dc['currents']['I_2']*1e6:.2f} uA")
     print(f"Total Current : {dc['currents']['I_total']*1e6:.2f} uA")

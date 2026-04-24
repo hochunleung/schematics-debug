@@ -1,0 +1,70 @@
+** sch_path: /home/ic7/test_xschem_sky130/test_amp.sch
+**.subckt test_amp
+XM1 net1 fb virtg GND sky130_fd_pr__nfet_01v8_lvt L=1 W=16 nf=8 ad=2.32 as=2.9 pd=18.32 ps=22.9 nrd=0.018125 nrs=0.018125 sa=0
++ sb=0 sd=0 mult=2 m=2
+XM2 net2 vcm virtg GND sky130_fd_pr__nfet_01v8_lvt L=1 W=16 nf=8 ad=2.32 as=2.9 pd=18.32 ps=22.9 nrd=0.018125 nrs=0.018125 sa=0
++ sb=0 sd=0 mult=2 m=2
+XM3 virtg vb GND GND sky130_fd_pr__nfet_01v8 L=1 W=16 nf=8 ad=2.32 as=2.9 pd=18.32 ps=22.9 nrd=0.018125 nrs=0.018125 sa=0 sb=0
++ sd=0 mult=1 m=1
+XM4 vb vb GND GND sky130_fd_pr__nfet_01v8 L=1 W=2 nf=1 ad=0.58 as=0.58 pd=4.58 ps=4.58 nrd=0.145 nrs=0.145 sa=0 sb=0 sd=0 mult=1
++ m=1
+XM5 out vb GND GND sky130_fd_pr__nfet_01v8 L=1 W=32 nf=16 ad=4.64 as=5.22 pd=36.64 ps=41.22 nrd=0.0090625 nrs=0.0090625 sa=0 sb=0
++ sd=0 mult=1 m=1
+V1 vcc GND 1.8
+.save i(v1)
+I0 vcc vb 1u
+V2 vcm GND 0.9
+.save i(v2)
+XM6 net2 net1 vcc vcc sky130_fd_pr__pfet_01v8_lvt L=1 W=4 nf=4 ad=0.58 as=0.87 pd=5.16 ps=7.74 nrd=0.0725 nrs=0.0725 sa=0 sb=0
++ sd=0 mult=1 m=1
+XM7 out net2 vcc vcc sky130_fd_pr__pfet_01v8_lvt L=1 W=4 nf=4 ad=0.58 as=0.87 pd=5.16 ps=7.74 nrd=0.0725 nrs=0.0725 sa=0 sb=0 sd=0
++ mult=4 m=4
+XM9 net1 net1 vcc vcc sky130_fd_pr__pfet_01v8_lvt L=1 W=4 nf=4 ad=0.58 as=0.87 pd=5.16 ps=7.74 nrd=0.0725 nrs=0.0725 sa=0 sb=0
++ sd=0 mult=1 m=1
+Vstb out fb dc 0 ac 1
+.save i(vstb)
+Istb GND out dc 0 ac 0
+**** begin user architecture code
+
+
+
+.include test_amp.save
+.option reltol=1e-5
++  abstol=1e-14 savecurrents
+.control
+  save all
+  op
+  remzerovec
+  write test_amp.raw
+  set appendwrite
+  alter Vstb ac=1
+  alter Istb ac=0
+  ac dec 20 1 10G
+  set vplot = $curplot;
+  alter Vstb ac=0
+  alter Istb ac=1
+  ac dec 20 1 10G
+  set iplot = $curplot;
+  let v_out_v = {$vplot}.v(out)
+  let v_fb_v  = {$vplot}.v(fb)
+  let v_out_i = {$iplot}.v(out)
+  let v_fb_i  = {$iplot}.v(fb)
+  let T = (v_out_v * v_fb_i - v_fb_v) / (v_fb_v + v_out_v)
+  let loop_phase = ph(T) * 180 / PI
+  let loop_gain = db(T)
+  plot loop_gain loop_phase ylimit -180 180
+  meas ac gbw when loop_gain=0
+  meas ac pm_at_gbw find loop_phase when loop_gain=0
+  let pm = 180 + pm_at_gbw
+  print pm
+.endc
+
+
+
+** opencircuitdesign pdks install
+.lib /usr/local/share/pdk/sky130B/libs.tech/combined/sky130.lib.spice tt
+
+**** end user architecture code
+**.ends
+.GLOBAL GND
+.end

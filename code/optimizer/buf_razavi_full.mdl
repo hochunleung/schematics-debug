@@ -1,0 +1,129 @@
+// Generated for: spectre
+// Generated on: Apr 21 16:14:22 2026
+// Design library name: mylib_tmp
+// Design cell name: sim_op_3_3_dc
+// Design view name: schematic
+simulator lang=spectre
+global 0
+parameters Iadj=2.98u vdd=0.9 vcm=0.450 vdm=0 fin=53/512*100M
+include "/eda/pdk/TSMC/22ull/1p8m/tsmcN22/../models/spectre/toplevel.scs" section=top_tt
+
+// Library name: mylib_tmp
+// Cell name: sim_op_3_3_dc
+// View name: schematic
+vprb (x p) vsource dc=0 type=dc
+Vi (x p2) vsource dc=0 mag=0 type=dc
+V11 (VDD 0) vsource dc=vdd type=dc
+fiinj (0 n) pcccs gain=-1 probes=[ vprb Vi ] coeffs=[ 0 1 1 ]
+R38 (p2 4) resistor r=40.51K
+R34 (p1 n) resistor r=4K
+R35 (n1 p) resistor r=4K
+R41 (n2 4) resistor r=40.51K
+R39 (1 3) resistor r=40.51K
+R42 (net19 1) resistor r=204.6
+R40 (2 3) resistor r=40.51K
+R37 (inp p1) resistor r=4K
+R36 (inn n1) resistor r=4K
+R43 (net16 2) resistor r=204.6
+M0 (VBN VBN 0 0) nch_mac l=500n w=32.0u multi=1 nf=16 sd=120.0n \
+        ad=1.92e-12 as=2.16e-12 pd=33.92u ps=38.16u nrd=0.012010 \
+        nrs=0.012010 sa=2.55897u sb=2.55897u sa1=848.482n sa2=1.69559u \
+        sa3=1.36049u sa4=2.1146u sb1=848.482n sb2=1.69559u sb3=1.36049u \
+        spa=120.0n spa1=120.0n spa2=120.0n spa3=120.0n sap=314.354n \
+        sapb=476.368n spba=281.836n spba1=303.451n dfm_flag=0 \
+        spmt=1.16959e+15 spomt=0 spomt1=1.16959e+60 spmb=1.16959e+15 \
+        spomb=0 spomb1=1.16959e+60
+M7 (p2 4 0 0) nch_mac l=100n w=48.0u multi=1 nf=16 sd=120.0n ad=2.88e-12 \
+        as=3.24e-12 pd=49.92u ps=56.16u nrd=0.008006 nrs=0.008006 \
+        sa=1.26979u sb=1.26979u sa1=724.96n sa2=1.04106u sa3=1.0665u \
+        sa4=1.23235u sb1=724.96n sb2=1.04106u sb3=1.0665u spa=120.0n \
+        spa1=120.0n spa2=120.0n spa3=120.0n sap=262.61n sapb=339.884n \
+        spba=169.115n spba1=172.916n dfm_flag=0 spmt=1.16959e+15 spomt=0 \
+        spomt1=1.16959e+60 spmb=1.16959e+15 spomb=0 spomb1=1.16959e+60
+M8 (n2 4 0 0) nch_mac l=100n w=48.0u multi=1 nf=16 sd=120.0n ad=2.88e-12 \
+        as=3.24e-12 pd=49.92u ps=56.16u nrd=0.008006 nrs=0.008006 \
+        sa=1.26979u sb=1.26979u sa1=724.96n sa2=1.04106u sa3=1.0665u \
+        sa4=1.23235u sb1=724.96n sb2=1.04106u sb3=1.0665u spa=120.0n \
+        spa1=120.0n spa2=120.0n spa3=120.0n sap=262.61n sapb=339.884n \
+        spba=169.115n spba1=172.916n dfm_flag=0 spmt=1.16959e+15 spomt=0 \
+        spomt1=1.16959e+60 spmb=1.16959e+15 spomb=0 spomb1=1.16959e+60
+M10 (s VBN 0 0) nch_mac l=500n w=32.0u multi=1 nf=16 sd=120.0n ad=1.92e-12 \
+        as=2.16e-12 pd=33.92u ps=38.16u nrd=0.012010 nrs=0.012010 \
+        sa=2.55897u sb=2.55897u sa1=848.482n sa2=1.69559u sa3=1.36049u \
+        sa4=2.1146u sb1=848.482n sb2=1.69559u sb3=1.36049u spa=120.0n \
+        spa1=120.0n spa2=120.0n spa3=120.0n sap=314.354n sapb=476.368n \
+        spba=281.836n spba1=303.451n dfm_flag=0 spmt=1.16959e+15 spomt=0 \
+        spomt1=1.16959e+60 spmb=1.16959e+15 spomb=0 spomb1=1.16959e+60
+I17 (0 x) isource dc=0 mag=1 type=dc
+I26 (VDD VBN) isource dc=80u type=dc
+I35 (4 0) isource dc=5.926u type=dc
+evinj (n2 n p2 p) vcvs gain=-1
+M1 (1 p1 s s) nch_lvt_mac l=100n w=96.0u multi=1 nf=32 sd=120.0n \
+        ad=5.76e-12 as=6.12e-12 pd=99.84u ps=106.08u nrd=0.004124 \
+        nrs=0.004124 sa=2.0668u sb=2.0668u sa1=915.078n sa2=1.48194u \
+        sa3=1.37628u sa4=1.99962u sb1=915.078n sb2=1.48194u sb3=1.37628u \
+        spa=120.0n spa1=120.0n spa2=120.0n spa3=120.0n sap=308.553n \
+        sapb=383.57n spba=169.115n spba1=172.916n dfm_flag=0 \
+        spmt=1.16959e+15 spomt=0 spomt1=1.16959e+60 spmb=1.16959e+15 \
+        spomb=0 spomb1=1.16959e+60
+M2 (2 n1 s s) nch_lvt_mac l=100n w=96.0u multi=1 nf=32 sd=120.0n \
+        ad=5.76e-12 as=6.12e-12 pd=99.84u ps=106.08u nrd=0.004124 \
+        nrs=0.004124 sa=2.0668u sb=2.0668u sa1=915.078n sa2=1.48194u \
+        sa3=1.37628u sa4=1.99962u sb1=915.078n sb2=1.48194u sb3=1.37628u \
+        spa=120.0n spa1=120.0n spa2=120.0n spa3=120.0n sap=308.553n \
+        sapb=383.57n spba=169.115n spba1=172.916n dfm_flag=0 \
+        spmt=1.16959e+15 spomt=0 spomt1=1.16959e+60 spmb=1.16959e+15 \
+        spomb=0 spomb1=1.16959e+60
+M3 (1 3 VDD VDD) pch_mac l=100n w=96.0u multi=1 nf=32 sd=120.0n \
+        ad=5.76e-12 as=6.12e-12 pd=99.84u ps=106.08u nrd=0.001435 \
+        nrs=0.001435 sa=2.0668u sb=2.0668u sa1=915.078n sa2=1.48194u \
+        sa3=1.37628u sa4=1.99962u sb1=915.078n sb2=1.48194u sb3=1.37628u \
+        spa=120.0n spa1=120.0n spa2=120.0n spa3=120.0n sap=308.553n \
+        sapb=383.57n spba=169.115n spba1=172.916n dfm_flag=0 \
+        spmt=1.16959e+15 spomt=0 spomt1=1.16959e+60 spmb=1.16959e+15 \
+        spomb=0 spomb1=1.16959e+60
+M5 (p2 1 VDD VDD) pch_mac l=100n w=192.000000u multi=1 nf=64 sd=120.0n \
+        ad=1.152e-11 as=1.188e-11 pd=199.68u ps=205.92u nrd=0.000729 \
+        nrs=0.000729 sa=3.46889u sb=3.46889u sa1=1.15522u sa2=2.10978u \
+        sa3=1.75643u sa4=3.35328u sb1=1.15522u sb2=2.10978u sb3=1.75643u \
+        spa=120.0n spa1=120.0n spa2=120.0n spa3=120.0n sap=366.553n \
+        sapb=436.465n spba=169.115n spba1=172.916n dfm_flag=0 \
+        spmt=1.16959e+15 spomt=0 spomt1=1.16959e+60 spmb=1.16959e+15 \
+        spomb=0 spomb1=1.16959e+60
+M6 (n2 2 VDD VDD) pch_mac l=100n w=192.000000u multi=1 nf=64 sd=120.0n \
+        ad=1.152e-11 as=1.188e-11 pd=199.68u ps=205.92u nrd=0.000729 \
+        nrs=0.000729 sa=3.46889u sb=3.46889u sa1=1.15522u sa2=2.10978u \
+        sa3=1.75643u sa4=3.35328u sb1=1.15522u sb2=2.10978u sb3=1.75643u \
+        spa=120.0n spa1=120.0n spa2=120.0n spa3=120.0n sap=366.553n \
+        sapb=436.465n spba=169.115n spba1=172.916n dfm_flag=0 \
+        spmt=1.16959e+15 spomt=0 spomt1=1.16959e+60 spmb=1.16959e+15 \
+        spomb=0 spomb1=1.16959e+60
+M4 (2 3 VDD VDD) pch_mac l=100n w=96.0u multi=1 nf=32 sd=120.0n \
+        ad=5.76e-12 as=6.12e-12 pd=99.84u ps=106.08u nrd=0.001435 \
+        nrs=0.001435 sa=2.0668u sb=2.0668u sa1=915.078n sa2=1.48194u \
+        sa3=1.37628u sa4=1.99962u sb1=915.078n sb2=1.48194u sb3=1.37628u \
+        spa=120.0n spa1=120.0n spa2=120.0n spa3=120.0n sap=308.553n \
+        sapb=383.57n spba=169.115n spba1=172.916n dfm_flag=0 \
+        spmt=1.16959e+15 spomt=0 spomt1=1.16959e+60 spmb=1.16959e+15 \
+        spomb=0 spomb1=1.16959e+60
+C1 (n2 net16) capacitor c=402f
+C0 (p2 net19) capacitor c=402f
+simulatorOptions options psfversion="1.4.0" reltol=1e-5 vabstol=1e-6 \
+    iabstol=1e-12 temp=27 tnom=27 scalem=1.0 scale=1.0 gmin=1e-12 rforce=1 \
+    maxnotes=5 maxwarns=5 digits=5 cols=80 pivrel=1e-3 \
+    sensfile="../psf/sens.output" checklimitdest=psf 
+dcOp dc write="spectre.dc" maxiters=150 maxsteps=10000 annotate=status
+dcOpInfo info what=oppoint where=rawfile
+ac ac start=1 stop=10G annotate=status 
+tran tran stop=5.3u errpreset=conservative maxstep=0.1n write="spectre.ic" \
+    writefinal="spectre.fc" annotate=status maxiters=5 
+finalTimeOP info what=oppoint where=rawfile
+pss  pss  fund=10.3515625M  harms=10  errpreset=conservative
++    annotate=status
+modelParameter info what=models where=rawfile
+element info what=inst where=rawfile
+outputParameter info what=output where=rawfile
+designParamVals info what=parameters where=rawfile
+primitives info what=primitives where=rawfile
+subckts info what=subckts where=rawfile
+saveOptions options save=allpub

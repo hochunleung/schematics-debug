@@ -1,0 +1,25 @@
+{
+  "tech_params": {
+    "vdd": 0.9,
+    "vcm": 0.45,
+    "stb_probe": true
+  },
+  "fixed_voltages": {
+    "VDD": "vdd",
+    "0": 0,
+    "inp": "vcm",
+    "inn": "vcm",
+    "p1": "vcm",
+    "p2": "vcm",
+    "n1": "vcm",
+    "n2": "vcm"
+  },
+  "saved_currents":["M10", "M5", "R38"],
+  "solver_settings": {
+    "ignored_isources": ["IPRB", "IADJ"],
+    "kcl_tricks": {
+      "p2": "4",
+      "n2": "4"
+    }
+  }
+}
