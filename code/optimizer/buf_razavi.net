@@ -1,7 +1,7 @@
 Vprb (x p) vsource dc=0 type=dc
 Vi (x p2) vsource dc=0 mag=0 type=dc
-V11 (VDD 0) vsource dc=vdd type=dc
 fiinj (0 n) pcccs gain=-1 probes=[ vprb Vi ] coeffs=[ 0 1 1 ]
+evinj (n2 n p2 p) vcvs gain=-1
 R38 (p2 4) resistor r=40.51K
 R34 (p1 n) resistor r=4K
 R35 (n1 p) resistor r=4K
@@ -19,7 +19,7 @@ M10 (s VBN 0 0) nch_mac l=500n w=32.0u multi=1 nf=16
 Iprb (0 x) isource dc=0 mag=1 type=dc
 I26 (VDD VBN) isource dc=80u type=dc
 Iadj (4 0) isource dc=5.926u type=dc
-evinj (n2 n p2 p) vcvs gain=-1
+V11 (VDD 0) vsource dc=vdd type=dc
 M1 (1 p1 s s) nch_lvt_mac l=100n w=96.0u multi=1 nf=32
 M2 (2 n1 s s) nch_lvt_mac l=100n w=96.0u multi=1 nf=32
 M3 (1 3 VDD VDD) pch_mac l=100n w=96.0u multi=1 nf=32

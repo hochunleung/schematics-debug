@@ -40,13 +40,13 @@ def hd_analysis(op_config, hd_config, V_AMP_IN=0.632, FIN=10.35e6, F_SPACING=1e6
 
     # 創建將包含在 MNA 矩陣中的動態節點列表
     dynamic_nodes = sorted(list(set(all_nodes) - set(fixed_voltages_to_exclude) - set(stb_nodes_to_exclude)))
-    dynamic_nodes.extend(['I_VINP', 'I_VINN'])
+    input_p_node = hd_probes['input']['p']
+    input_n_node = hd_probes['input'].get('n', False)
+    dynamic_nodes.extend(['I_VINP', 'I_VINN'] if input_n_node else ['I_VINP'])
     NUM_VARS = len(dynamic_nodes)
     node_to_idx = {n: i for i, n in enumerate(dynamic_nodes)}
     if 'stb_probes' in op_config:
         node_to_idx[p2], node_to_idx[n2] = node_to_idx[p], node_to_idx[n]
-    input_p_node = hd_probes['input']['p']
-    input_n_node = hd_probes['input']['n']
 
     # 1. 動態提取 K 字典和寄生電容字典
     K_dict = {}
@@ -118,10 +118,14 @@ def hd_analysis(op_config, hd_config, V_AMP_IN=0.632, FIN=10.35e6, F_SPACING=1e6
             add_y(d_node, b_node, s * C_dict[mos_name]['Cdb']) # Cdb 在 D 和 B 之間
         
         # === MNA 擴充矩陣核心：加入理想電壓源的 KVL 邊界條件 ===
-        N_INP, N_INN = node_to_idx[input_p_node], node_to_idx[input_n_node]
-        I_VINP, I_VINN = node_to_idx['I_VINP'], node_to_idx['I_VINN']
+        N_INP = node_to_idx[input_p_node] 
+        I_VINP = node_to_idx['I_VINP']
         Y[N_INP, I_VINP] = 1.0; Y[I_VINP, N_INP] = 1.0
-        Y[N_INN, I_VINN] = 1.0; Y[I_VINN, N_INN] = 1.0
+        
+        if input_n_node:
+            N_INN = node_to_idx[input_n_node]
+            I_VINN = node_to_idx['I_VINN']
+            Y[N_INN, I_VINN] = 1.0; Y[I_VINN, N_INN] = 1.0
         # =======================================================
 
         return Y
@@ -193,8 +197,12 @@ def hd_analysis(op_config, hd_config, V_AMP_IN=0.632, FIN=10.35e6, F_SPACING=1e6
     #R_in_val = op_config['passives']['R_in'] # 假設 R_in 始終在 passives 中用於輸入電流計算
 
     # 正確的 MNA 激勵：將電壓值填入 KVL 方程式對應的 RHS 位置 (即電流變量的索引)
-    I_in1[node_to_idx['I_VINP']] = 0.5 * V_AMP_IN
-    I_in1[node_to_idx['I_VINN']] = -0.5 * V_AMP_IN
+
+    if input_n_node:
+        I_in1[node_to_idx['I_VINP']] = 0.5 * V_AMP_IN
+        I_in1[node_to_idx['I_VINN']] = -0.5 * V_AMP_IN
+    else:
+        I_in1[node_to_idx['I_VINP']] = V_AMP_IN
 
     V1a_raw = np.linalg.solve(Y1a, I_in1)
     V1b_raw = np.linalg.solve(Y1b, I_in1)
@@ -272,7 +280,7 @@ def hd_analysis(op_config, hd_config, V_AMP_IN=0.632, FIN=10.35e6, F_SPACING=1e6
 
     # 4. 指標結算
     output_p_node = hd_probes['output']['p']
-    output_n_node = hd_probes['output']['n']
+    output_n_node = hd_probes['output'].get('n', '0')
 
     v1_out = V1a.get(output_p_node, 0) - V1a.get(output_n_node, 0)
     v2_out = V2a.get(output_p_node, 0) - V2a.get(output_n_node, 0)

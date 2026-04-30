@@ -1,7 +1,7 @@
 import numpy as np
 from lut_engine import MosData
 
-def noise_analysis(op_config, freqs, T=300):
+def noise_analysis(op_config, noise_config, freqs, T=300):
     """
     通用化的全差分/單端雜訊評估函數。
     :param op_config: 包含電路拓撲、操作點和元件參數的字典。
@@ -13,24 +13,34 @@ def noise_analysis(op_config, freqs, T=300):
     # =================================================================
     # 1. 矩陣索引映射 (Mapping)
     # =================================================================
-    GND = -1 
-    op_config['hd_probes'] = {
-        'input': {'p': 'N_INP', 'n': 'N_INN'},
-        'output': {'p': 'N_P2', 'n': 'N_N2'}
-    }
+    GND = -1
+    noise_probes = noise_config.get('noise_probes', [])
+    # op_config['hd_probes'] = {
+    #     'input': {'p': 'inp', 'n': 'inn'},
+    #     'output': {'p': 'p2', 'n': 'n2'}
+    # }
     all_nodes = op_config['all_nodes']
-    fixed_voltages_to_exclude = ['VDD', 'VCM', '0'] 
+    #fixed_voltages_to_exclude = ['VDD', '0']
+    fixed_voltages_to_exclude = noise_config.get('fixed_voltages', [])
+    stb_nodes_to_exclude = []
+    if 'stb_probes' in op_config:
+        stb_probes = op_config['stb_probes']
+        vi, prb, evinj = stb_probes['Vi'], stb_probes['Vprb'], stb_probes['evinj']
+        p2, x, p, n2, n = vi['n'], vi['p'], prb['n'], evinj['p'], evinj['n']
+        stb_nodes_to_exclude.extend([p2, x, n2])
     
     # 1.1 建立動態節點清單 (不含 AC 地)
-    dynamic_nodes = sorted(list(set(all_nodes) - set(fixed_voltages_to_exclude)))
+    dynamic_nodes = sorted(list(set(all_nodes) - set(fixed_voltages_to_exclude) - set(stb_nodes_to_exclude)))
     node_to_idx = {n: i for i, n in enumerate(dynamic_nodes)}
+    if 'stb_probes' in op_config:
+        node_to_idx[p2], node_to_idx[n2] = node_to_idx[p], node_to_idx[n]
     NUM_NODES = len(dynamic_nodes)
 
     # 1.2 識別輸入與輸出探針節點
-    input_p_node = op_config['hd_probes']['input']['p']
-    input_n_node = op_config['hd_probes']['input']['n']
-    output_p_node = op_config['hd_probes']['output']['p']
-    output_n_node = op_config['hd_probes']['output']['n']
+    input_p_node = noise_probes['input']['p']
+    input_n_node = noise_probes['input']['n']
+    output_p_node = noise_probes['output']['p']
+    output_n_node = noise_probes['output']['n']
 
     # 1.3 劃分子矩陣索引 (用於 Partitioning 求解)
     input_nodes = [input_p_node, input_n_node]
@@ -184,45 +194,53 @@ if __name__ == "__main__":
     pch = MosData('pch_lut.csv', W_ref=4e-6, is_pmos=True)
 
     test_op_config = {
-        'all_nodes': ['N_INP', 'N_INN', 'N_P1', 'N_N1', 'N_S', 'N_1', 'N_2', 'N_3', 'N_P2', 'N_N2', 'N_4', 'mid1', 'mid2', 'VDD', 'VCM', '0'],
+        'all_nodes': ['inp', 'inn', 'N_P1', 'N_N1', 'N_S', 'N_1', 'N_2', 'N_3', 'p2', 'n2', 'N_4', 'mid1', 'mid2', 'VDD', 'VBN', '0'],
         'mosfets': {
             'M1':  {'d': 'N_1', 'g': 'N_P1', 's': 'N_S', 'b': 'N_S', 'VGS': 0.2565, 'VDS': 0.4191, 'W': 96e-6, 'L': 100e-9, 'model': nch_lvt},
             'M2':  {'d': 'N_2', 'g': 'N_N1', 's': 'N_S', 'b': 'N_S', 'VGS': 0.2565, 'VDS': 0.4191, 'W': 96e-6, 'L': 100e-9, 'model': nch_lvt},
             'M3':  {'d': 'N_1', 'g': 'N_3', 's': 'VDD', 'b': 'VDD', 'VGS': 0.2873, 'VDS': 0.2873, 'W': 96e-6, 'L': 100e-9, 'model': pch},
             'M4':  {'d': 'N_2', 'g': 'N_3', 's': 'VDD', 'b': 'VDD', 'VGS': 0.2873, 'VDS': 0.2873, 'W': 96e-6, 'L': 100e-9, 'model': pch},
-            'M5':  {'d': 'N_P2', 'g': 'N_1', 's': 'VDD', 'b': 'VDD', 'VGS': 0.2873, 'VDS': 0.4498, 'W': 192e-6,'L': 100e-9, 'model': pch},
-            'M6':  {'d': 'N_N2', 'g': 'N_2', 's': 'VDD', 'b': 'VDD', 'VGS': 0.2873, 'VDS': 0.4498, 'W': 192e-6,'L': 100e-9, 'model': pch},
-            'M7':  {'d': 'N_P2', 'g': 'N_4', 's': '0', 'b': '0', 'VGS': 0.3301, 'VDS': 0.4502, 'W': 48e-6, 'L': 100e-9, 'model': nch},
-            'M8':  {'d': 'N_N2', 'g': 'N_4', 's': '0', 'b': '0', 'VGS': 0.3301, 'VDS': 0.4502, 'W': 48e-6, 'L': 100e-9, 'model': nch},
-            'M10': {'d': 'N_S', 'g': 'VCM', 's': '0', 'b': '0', 'VGS': 0.4585, 'VDS': 0.1936, 'W': 32e-6, 'L': 500e-9, 'model': nch},
+            'M5':  {'d': 'p2', 'g': 'N_1', 's': 'VDD', 'b': 'VDD', 'VGS': 0.2873, 'VDS': 0.4498, 'W': 192e-6,'L': 100e-9, 'model': pch},
+            'M6':  {'d': 'n2', 'g': 'N_2', 's': 'VDD', 'b': 'VDD', 'VGS': 0.2873, 'VDS': 0.4498, 'W': 192e-6,'L': 100e-9, 'model': pch},
+            'M7':  {'d': 'p2', 'g': 'N_4', 's': '0', 'b': '0', 'VGS': 0.3301, 'VDS': 0.4502, 'W': 48e-6, 'L': 100e-9, 'model': nch},
+            'M8':  {'d': 'n2', 'g': 'N_4', 's': '0', 'b': '0', 'VGS': 0.3301, 'VDS': 0.4502, 'W': 48e-6, 'L': 100e-9, 'model': nch},
+            'M10': {'d': 'N_S', 'g': 'VBN', 's': '0', 'b': '0', 'VGS': 0.4585, 'VDS': 0.1936, 'W': 32e-6, 'L': 500e-9, 'model': nch},
         },
         'R': {
-            'R_f_p': {'p': 'N_P1', 'n': 'N_N2', 'val': 4000},
-            'R_f_n': {'p': 'N_N1', 'n': 'N_P2', 'val': 4000},
-            'R_in_p': {'p': 'N_P1', 'n': 'N_INP', 'val': 4000},
-            'R_in_n': {'p': 'N_N1', 'n': 'N_INN', 'val': 4000},
-            'R_cmfb_p2_4': {'p': 'N_P2', 'n': 'N_4', 'val': 40e3},
-            'R_cmfb_n2_4': {'p': 'N_N2', 'n': 'N_4', 'val': 40e3},
+            'R_f_p': {'p': 'N_P1', 'n': 'n2', 'val': 4000},
+            'R_f_n': {'p': 'N_N1', 'n': 'p2', 'val': 4000},
+            'R_in_p': {'p': 'N_P1', 'n': 'inp', 'val': 4000},
+            'R_in_n': {'p': 'N_N1', 'n': 'inn', 'val': 4000},
+            'R_cmfb_p2_4': {'p': 'p2', 'n': 'N_4', 'val': 40e3},
+            'R_cmfb_n2_4': {'p': 'n2', 'n': 'N_4', 'val': 40e3},
             'R_cmfb_1_3': {'p': 'N_1', 'n': 'N_3', 'val': 40e3},
             'R_cmfb_2_3': {'p': 'N_2', 'n': 'N_3', 'val': 40e3},
             'Rz1': {'p': 'mid1', 'n': 'N_1', 'val': 204.6},
             'Rz2': {'p': 'mid2', 'n': 'N_2', 'val': 204.6},
         },
         'C': {
-            'Cc1': {'p': 'N_P2', 'n': 'mid1', 'val': 402e-15},
-            'Cc2': {'p': 'N_N2', 'n': 'mid2', 'val': 402e-15},
+            'Cc1': {'p': 'p2', 'n': 'mid1', 'val': 402e-15},
+            'Cc2': {'p': 'n2', 'n': 'mid2', 'val': 402e-15},
         },
         # 'series_RC': {
-        #     'miller_p': {'p': 'N_P2', 'n': 'N_1', 'R': 204.6, 'C': 402e-15},
-        #     'miller_n': {'p': 'N_N2', 'n': 'N_2', 'R': 204.6, 'C': 402e-15},
+        #     'miller_p': {'p': 'p2', 'n': 'N_1', 'R': 204.6, 'C': 402e-15},
+        #     'miller_n': {'p': 'n2', 'n': 'N_2', 'R': 204.6, 'C': 402e-15},
         # },
         # 'hd_probes': {
-        #     'input': {'p': 'N_INP', 'n': 'N_INN'},
-        #     'output': {'p': 'N_P2', 'n': 'N_N2'}
+        #     'input': {'p': 'inp', 'n': 'inn'},
+        #     'output': {'p': 'p2', 'n': 'n2'}
         # }
     }
+
+    noise_config = {
+        "fixed_voltages": ["VDD", "0"],
+        "noise_probes": {
+            "input": {"p": "inp", "n": "inn"},
+            "output": {"p": "p2", "n": "n2"}
+        }
+    }
     
-    noise_results = noise_analysis(test_op_config, [10e6])
+    noise_results = noise_analysis(test_op_config, noise_config, [10e6])
     print(f"Gain      : {noise_results['gain'][0]:.4f}")
     print(f"Out Noise : {noise_results['out_noise_psd'][0]:.2e} V^2/Hz")
     print(f"In  Noise : {noise_results['irn_psd'][0]:.2e} V^2/Hz")

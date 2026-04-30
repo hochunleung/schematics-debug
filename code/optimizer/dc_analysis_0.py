@@ -5,8 +5,7 @@ from pprint import pprint
 from utils import load_circuit_config
 
 def solve_dc(netlist, models, config_dc):
-    tech_params = config_dc['tech_params']
-    vdd_val, vcm_val, is_include_stb = tech_params['vdd'], tech_params['vcm'], tech_params['is_include_stb']
+    vdd_val, vcm_val, is_include_stb = config_dc['vdd_val'], config_dc['vcm_val'], config_dc['is_include_stb']
     dict_models = {
         'nch_mac': models['nch'],
         'pch_mac': models['pch'],
@@ -18,32 +17,11 @@ def solve_dc(netlist, models, config_dc):
     ignored_isources = config_dc['solver_settings']['ignored_isources']
     # 未知電壓節點 (我們要解的變數)
     all_nodes = netlist.nodes
-    stb_nodes_to_exclude = []
-    op_config = {'mosfets': {}, 'R': {}, 'C': {}, 'saved_currents': {}, 'saved_op': {}}
-    if is_include_stb:
-        # MNA 探針分支擴充 (Ideal Sources & KCL/KVL Stamps)
-        vprb = netlist.get_element_by_name('Vprb')
-        vi = netlist.get_element_by_name('Vi')
-        evinj = netlist.get_element_by_name('evinj')
-        fiinj = netlist.get_element_by_name('fiinj')
-        # add_vsource(vprb['nodes'][0], vprb['nodes'][1], 0.0, 'I_Vprb')
-        # add_vsource(vi['nodes'][0], vi['nodes'][1], 0.0, 'I_Vi')
-        # add_vcvs(evinj['nodes'][0], evinj['nodes'][1], evinj['nodes'][2], evinj['nodes'][3], evinj['params']['gain'], 'I_evinj')
-        # add_pcccs(fiinj['nodes'][0], fiinj['nodes'][1], fiinj['params']['gain'], ['I_Vprb', 'I_Vi'], [0, 1, 1])
-        op_config['stb_probes'] = {
-            'Vi': {'p': vi['nodes'][0], 'n': vi['nodes'][1]},
-            'Vprb': {'p': vprb['nodes'][0], 'n': vprb['nodes'][1]},
-            'evinj': {'p': evinj['nodes'][0], 'n': evinj['nodes'][1], 'ctrl_p': evinj['nodes'][2], 'ctrl_n': evinj['nodes'][3]},
-            'fiinj': {'p': fiinj['nodes'][0], 'n': fiinj['nodes'][1]}
-        }
-        p2, x, p, n2, n = vi['nodes'][1], vi['nodes'][0], vprb['nodes'][1], evinj['nodes'][0], evinj['nodes'][1]
-        stb_nodes_to_exclude.extend([p2, x, n2])
+    unknown_nodes = sorted(list(set(all_nodes) - set(fixed_voltages.keys())))
+    if is_include_stb: unknown_nodes.extend(['I_Vprb', 'I_Vi', 'I_evinj'])
     #unknown_nodes = ['1', '2', '3', 's', '4', 'net19', 'net16', 'VBN']
-    unknown_nodes = sorted(list(set(all_nodes) - set(fixed_voltages.keys()) - set(stb_nodes_to_exclude)))
     NUM_VARS = len(unknown_nodes)
     node_to_idx = {n: i for i, n in enumerate(unknown_nodes)}
-    if is_include_stb:
-        node_to_idx[p2], node_to_idx[n2] = node_to_idx[p], node_to_idx[n]
     #pprint(unknown_nodes); pprint(node_to_idx)
 
     # KCL 映射表 (這是通用化的靈魂)
@@ -223,6 +201,7 @@ def solve_dc(netlist, models, config_dc):
         # ==========================================
         # 2. 構建電路 (遍歷 Netlist，呼叫 Stamp)
         # ==========================================
+        op_config = {'mosfets': {}, 'R': {}, 'C': {}, 'saved_currents': {}, 'saved_op': {}}
         resistors = netlist.get_elements_by_type('R')
         for res in resistors:
             node_p, node_n, val = res['nodes'][0], res['nodes'][1], res['params']['r']
@@ -245,6 +224,23 @@ def solve_dc(netlist, models, config_dc):
             if isource['name'] in ignored_isources: continue
             #pprint(isource)
             add_current_source(isource['nodes'][0], isource['nodes'][1], isource['params']['dc'])
+
+        if is_include_stb:
+            # MNA 探針分支擴充 (Ideal Sources & KCL/KVL Stamps)
+            vprb = netlist.get_element_by_name('Vprb')
+            vi = netlist.get_element_by_name('Vi')
+            evinj = netlist.get_element_by_name('evinj')
+            fiinj = netlist.get_element_by_name('fiinj')
+            add_vsource(vprb['nodes'][0], vprb['nodes'][1], 0.0, 'I_Vprb')
+            add_vsource(vi['nodes'][0], vi['nodes'][1], 0.0, 'I_Vi')
+            add_vcvs(evinj['nodes'][0], evinj['nodes'][1], evinj['nodes'][2], evinj['nodes'][3], evinj['params']['gain'], 'I_evinj')
+            add_pcccs(fiinj['nodes'][0], fiinj['nodes'][1], fiinj['params']['gain'], ['I_Vprb', 'I_Vi'], [0, 1, 1])
+            op_config['stb_probes'] = {
+                'Vi': {'p': vi['nodes'][0], 'n': vi['nodes'][1]},
+                'Vprb': {'p': vprb['nodes'][0], 'n': vprb['nodes'][1]},
+                'evinj': {'p': evinj['nodes'][0], 'n': evinj['nodes'][1], 'ctrl_p': evinj['nodes'][2], 'ctrl_n': evinj['nodes'][3]},
+                'fiinj': {'p': fiinj['nodes'][0], 'n': fiinj['nodes'][1]}
+            }
 
         # ==========================================
         # 3. 矩陣求解 (Newton-Raphson)
@@ -342,9 +338,8 @@ if __name__ == "__main__":
     #netlist = CircuitNetlist('buf_razavi_full.mdl', dialect='spectre')
     #netlist = CircuitNetlist('buf_razavi_simp.net', dialect='spectre')
 
-    config = load_circuit_config('config.json')
-    pprint(config)
-    op_config, dc = solve_dc(netlist, models, config['DC'])
+    config_dc = load_circuit_config('config.json')
+    op_config, dc = solve_dc(netlist, models, config_dc)
     pprint(op_config)
     pprint(dc)
     #pprint(op_config['stb_probes'])

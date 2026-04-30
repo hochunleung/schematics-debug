@@ -3,7 +3,7 @@
     "tech_params": {
       "vdd": 0.9,
       "vcm": 0.45,
-      "stb_probe": true
+      "stb_probe": false
     },
     "fixed_voltages": {
       "VDD": "vdd",
@@ -27,19 +27,13 @@
       }
     }
   },
-  "STB": {
-    "is_run_CM": false,
-    "fixed_voltages": ["VDD", "0", "inp", "inn"]
-  },
   "Distor": {
-    "fixed_voltages": ["VDD", "0"],
     "hd_probes": {
         "input": {"p": "inp", "n": "inn"},
         "output": {"p": "p2", "n": "n2"}
     }
   },
   "noise": {
-    "fixed_voltages": ["VDD", "0"],
     "noise_probes": {
         "input": {"p": "inp", "n": "inn"},
         "output": {"p": "p2", "n": "n2"}

@@ -3,27 +3,13 @@ from scipy.optimize import differential_evolution, NonlinearConstraint
 from functools import lru_cache
 from scipy.optimize import root
 from lut_engine import MosData
-from dc_razavi import solve_dc_fully_diff
-from stb_razavi_para import evaluate_razavi_fully_diff_optimizer_ready 
-from hd_razavi_para import evaluate_volterra_sfdr
-from noise_razavi_para import evaluate_differential_noise
+from circuit_netlist import CircuitNetlist
+from utils import load_circuit_config
+from dc_analysis import solve_dc
+from stb_analysis import stb_analysis 
+from hd_analysis import hd_analysis
+from noise_analysis import noise_analysis
 from pprint import pprint
-
-# =====================================================================
-# 1. 系統常數與資料庫初始化
-# =====================================================================
-VDD = 0.9
-V_in_CM = 0.45
-V_out_CM = 0.45
-#I_TOTAL = 200e-6 # 總功耗預算：200uA
-
-# 載入 LUT 資料庫 (注意 P 管開啟 is_pmos=True)
-nch_lvt = MosData('nch_lvt_lut.csv', W_ref=4e-6, is_pmos=False)
-nch = MosData('nch_lut.csv', W_ref=4e-6, is_pmos=False)
-pch = MosData('pch_lut.csv', W_ref=4e-6, is_pmos=True)
-models = {'nch': nch, 'nch_lvt': nch_lvt, 'pch': pch}
-W_unit = 4e-6
-L_unit = 10e-9
 
 # =====================================================================
 # 2. 緩存模擬引擎 (避免重複計算)
@@ -40,13 +26,14 @@ def run_full_simulation(x_tuple):
     """
     x = np.array(x_tuple)
     try:
-        op_config, dc = solve_dc_fully_diff(x, models)
-        stb = evaluate_razavi_fully_diff_optimizer_ready(op_config, is_plot=False)
-        hd = evaluate_volterra_sfdr(op_config, V_AMP_IN=0.316, FIN=53/512*100e6)
-        noise = evaluate_differential_noise(op_config, [10e6])
+        op_config, dc = solve_dc(netlist, models, config['DC'])
+        stb = stb_analysis(op_config, config['STB'], is_plot=True)
+        hd = hd_analysis(op_config, config['hd'], V_AMP_IN = 0.316, FIN=53/512*100e6)
+        noise = noise_analysis(op_config, config['noise'], [1e6, 10e6])
         
         return {
             'success': True,
+            'op_config': op_config,
             'dc': dc,
             'stb': stb,
             'hd': hd,
@@ -70,10 +57,10 @@ def constraints_func(x):
         # -100.0 對應 GM (量級 10~100 dB)
         return [-1.0, -180.0, -100.0] 
 
-    dc, stb = res['dc'], res['stb']
+    dc, stb, op_config = res['dc'], res['stb'], res['op_config']
     # 新的 tail_vds 約束：dc['s'] >= dc['tail_vdsat']
     # 等價於 dc['s'] - dc['tail_vdsat'] >= 0
-    tail_vds_violation = dc['s'] - dc['vdsat_tail']
+    tail_vds_violation = dc['s'] - op_config['saved_op']['M10']['VDSAT']
 
     return [
         tail_vds_violation, # tail_vds - tail_vdsat
@@ -129,7 +116,7 @@ def objective(x):
 # 4. 執行全局優化 (Differential Evolution)
 # =====================================================================
 if __name__ == "__main__":
-    print("Initializing Global Optimizer...")
+    # print("Initializing Global Optimizer...")
     
     # 設定搜索邊界 (Bounds)
     # Unit 數量: 1 到 20 (即 W 從 4u 到 80u)
@@ -225,12 +212,12 @@ if __name__ == "__main__":
     #     polish=False  # 關閉局部微調，節省大量時間
     # )
 
-    print("\n" + "="*50)
-    print("🎉 Optimization Complete! 🎉")
-    print("="*50)
+    # print("\n" + "="*50)
+    # print("🎉 Optimization Complete! 🎉")
+    # print("="*50)
     
-    # 解包最優解
-    #best_x = result.x
+    # # 解包最優解
+    # best_x = result.x
     # print(f"Optimal W1   : {best_x[0] * 4} um  | L1  : {best_x[1]*10:.0f} nm")
     # print(f"Optimal W3   : {best_x[2] * 4} um  | L3  : {best_x[3]*10:.0f} nm")
     # print(f"Optimal W5   : {best_x[4] * 4} um  | L5  : {best_x[3]*10:.0f} nm (Bound to L3)")
@@ -242,29 +229,42 @@ if __name__ == "__main__":
     # print(f"Optimal Rcmfb: {best_x[12]:.1f} Ohm")
     # print(f"Optimal I_tail : {best_x[13]*1e6:.1f} uA")
 
-    pprint(initial_guess)
-    op_config, dc = solve_dc_fully_diff(initial_guess, models)
-    stb = evaluate_razavi_fully_diff_optimizer_ready(op_config, is_plot=True)
-    hd = evaluate_volterra_sfdr(op_config, V_AMP_IN = 0.316, FIN=53/512*100e6)
-    noise = evaluate_differential_noise(op_config, [1e6, 10e6])
+    #pprint(best_x)
     
+    nch_lvt = MosData('nch_lvt_lut.csv', W_ref=4e-6, is_pmos=False)
+    nch = MosData('nch_lut.csv', W_ref=4e-6, is_pmos=False)
+    pch = MosData('pch_lut.csv', W_ref=4e-6, is_pmos=True)
+    models = {'nch': nch, 'nch_lvt': nch_lvt, 'pch': pch}
+    # W_unit = 4e-6
+    # L_unit = 10e-9
+    netlist = CircuitNetlist('buf_razavi.net', dialect='spectre')
+    #netlist = CircuitNetlist('buf_razavi_full.mdl', dialect='spectre')
+    #netlist = CircuitNetlist('buf_razavi_simp.net', dialect='spectre')
+
+    config = load_circuit_config('config.json')
+    op_config, dc = solve_dc(netlist, models, config['DC'])
+    stb = stb_analysis(op_config, config['STB'], is_plot=True)
+    hd = hd_analysis(op_config, config['hd'], V_AMP_IN = 0.316, FIN=53/512*100e6)
+    noise = noise_analysis(op_config, config['noise'], [1e6, 10e6])
+
     print("\n=== DC ===")
     print(f"Tail VDS      : {dc['s']*1e3:.2f} mV")
-    print(f"Tail VDSat    : {dc['vdsat_tail']*1e3:.2f} mV")
-    print(f"Tail Current  : {dc['currents']['I_tail']*1e6:.2f} uA")
-    print(f"Output Current: {dc['currents']['I_2']*1e6:.2f} uA")
-    print(f"Total Current : {dc['currents']['I_total']*1e6:.2f} uA")
-    print(f"CMFB Current  : {dc['currents']['I_adj']*1e6:.2f} uA")
+    print(f"Tail VDSat    : {op_config['saved_op']['M10']['VDSAT']*1e3:.2f} mV")
+    i_m10 = op_config['saved_currents']['M10']; i_m5 = op_config['saved_currents']['M5']
+    print(f"Tail Current  : {i_m10*1e6:.2f} uA")
+    print(f"Output Current: {i_m5*1e6:.2f} uA")
+    print(f"Total Current : {(i_m10 + i_m5*2)*1e6:.2f} uA")
+    print(f"CMFB Current  : {op_config['saved_currents']['R38']*1e6:.2f} uA")
     print("=== STB ===")
-    print(f"DC Gain     : {stb['gain']:.2f} dB")
-    print(f"Phase Margin: {stb['pm']:.2f} Deg")
-    print(f"Gain Margin : {stb['gm']:.2f} dB")
-    print(f"UGF         : {stb['ugf']/1e6:.2f} MHz")
+    print(f"DC Gain     : {stb['dm']['gain']:.2f} dB")
+    print(f"Phase Margin: {stb['dm']['pm']:.2f} Deg")
+    print(f"Gain Margin : {stb['dm']['gm']:.2f} dB")
+    print(f"UGF         : {stb['dm']['ugf']/1e6:.2f} MHz")
     print(f"=== distor ===")
     print(f"閉環差分增益 (A1): {hd['Gain_V_V']:.5f} V/V")
     print(f"HD2        : {hd['HD2_dBc']:.2f} dBc (完美對稱抵消)")
     print(f"HD3        : {hd['HD3_dBc']:.2f} dBc")
-    print(f"SFDR       : {-hd['HD3_dBc']:.2f} dBc")
+    print(f"SFDR       : {hd['SFDR_dBc']:.2f} dBc")
     print(f"OIP3       : {hd['OIP3_dBm']:.2f} dBm")
     print(f"=== noise ===")
     print(f"@1MHz ------")

@@ -236,7 +236,7 @@ def evaluate_volterra_sfdr(op_config, V_AMP_IN=0.632, FIN=10.35e6, F_SPACING=1e6
 
     # 線性相量振幅轉化 (數學上都需要乘上 0.25 來對應時域 Cosine)
     a1_closed = v1_out / V_AMP_IN
-    hd2_lin = 0.25 * np.abs(v2_out / v1_out)  # 雙輸入 0.5 * 0.5
+    hd2_lin = 0.5 * np.abs(v2_out / v1_out)  # 雙輸入 0.5 * 0.5
     hd3_lin = 0.25 * np.abs(v3_out_hd3 / v1_out)
     imd3_lin = 0.25 * np.abs(v3_out_imd3 / v1_out)
     
@@ -289,4 +289,4 @@ if __name__ == "__main__":
     
     print(f"HD2        : {metrics['HD2_dBc']:.2f} dBc (完美對稱抵消)")
     print(f"HD3        : {metrics['HD3_dBc']:.2f} dBc")
-    print(f"SFDR       : {-metrics['HD3_dBc']:.2f} dBc")
+    print(f"SFDR       : {metrics['SFDR_dBc']:.2f} dBc")
